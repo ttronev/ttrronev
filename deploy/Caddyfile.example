@@ -1,0 +1,19 @@
+# Caddy site block for ttrronev-service (prod VPS).
+#
+# The app itself has NO auth and binds to 127.0.0.1:8000 only (see
+# docker-compose.yml); Caddy is the single public entry and carries
+# basic auth + TLS.
+#
+# Generate the password hash on the server:
+#     caddy hash-password
+# and paste it below. Reload with:  systemctl reload caddy
+#
+# Requires Caddy >= 2.8 (`basic_auth` was spelled `basicauth` before 2.8).
+# On an older distro-packaged Caddy, rename the directive or upgrade.
+
+levels.example.com {
+    basic_auth {
+        egor <hash-from-caddy-hash-password>
+    }
+    reverse_proxy 127.0.0.1:8000
+}

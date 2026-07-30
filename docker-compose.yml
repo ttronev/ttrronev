@@ -1,0 +1,26 @@
+# ttrronev-service — analysis worker + web API. No trading here.
+#
+# prod:  docker compose up -d
+# dev:   docker compose -f docker-compose.yml -f docker-compose.override.dev.yml up
+services:
+  worker:
+    build: .
+    command: python -m service.worker
+    env_file:
+      - path: .env
+        required: false   # absent .env = no Telegram DMs, everything else works
+    volumes:
+      - ./data:/app/data
+      - ./detectors/results:/app/detectors/results
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: uvicorn service.api:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./data:/app/data:ro
+      - ./detectors/results:/app/detectors/results:ro
+    ports:
+      - "127.0.0.1:8000:8000"   # localhost only; Caddy proxies + auths outside
+    depends_on: [worker]
+    restart: unless-stopped

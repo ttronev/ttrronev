@@ -1,0 +1,32 @@
+# Keep the image small: code only. Data and results live on volumes.
+.git
+.venv
+venv
+.env
+.claude
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# data + generated artifacts (mounted as volumes)
+data/raw
+data/processed
+detectors/results
+backtesting/results
+logs
+paper_trade/data
+paper_trade/logs
+*.sqlite
+
+# research-only trees not needed by the service
+ml_models
+avax_parity.log
+link_parity.log
+sol_parity.log
+sol_3rr_trade_log.csv
+
+# junk
+**/__pycache__
+*.pyc
+*.png
+*.log

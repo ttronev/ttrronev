@@ -1,0 +1,29 @@
+[Unit]
+Description=ttrronev paper-trade Phase 1a
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# CHANGE these to match the deploy:
+User=ttrronev
+Group=ttrronev
+WorkingDirectory=/opt/ttrronev
+# Env file holds secrets (TG bot token, chat id, Bybit creds for 1b).
+# Permissions: chmod 600, owned by the service user.
+EnvironmentFile=/opt/ttrronev/.env
+ExecStart=/opt/ttrronev/.venv/bin/python -m paper_trade.run
+Restart=on-failure
+RestartSec=10
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ttrronev/paper_trade/data /opt/ttrronev/paper_trade/logs
+ProtectHome=true
+# Stdout/stderr go to journald.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

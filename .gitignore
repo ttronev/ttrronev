@@ -1,0 +1,57 @@
+# --- Secrets / env -------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Python --------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# --- Virtual environments ------------------------------------------------------
+.venv/
+venv/
+
+# --- ttrronev runtime artifacts (not source) -----------------------------------
+/logs/
+/data/raw/
+/data/processed/
+/ml_models/models/
+
+# Keep folder structure for the gitignored runtime dirs
+!/logs/.gitkeep
+!/logs/trades/README.md
+!/logs/errors/README.md
+!/data/raw/README.md
+!/data/processed/README.md
+!/ml_models/models/README.md
+
+# Backtest outputs
+/backtesting/results/
+
+# Detector / service artifacts (live on the docker volume, not in git)
+/detectors/results/
+
+# Paper-trade runtime state (sqlite DBs, session logs)
+/paper_trade/data/
+/paper_trade/logs/
+
+# Claude Code local settings (machine-specific)
+/.claude/
+
+# --- OS / editor ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Node (only here for safety; project is Python-first) ----------------------
+node_modules/
+
+# --- OpenClaw local state ------------------------------------------------------
+.openclaw_state.json

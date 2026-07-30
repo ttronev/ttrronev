@@ -1,0 +1,10 @@
+# ttrronev-service runtime deps — minimal and pinned (the versions the
+# service was validated against). The old requirements.txt (torch,
+# backtrader, flask, ...) is research tooling and stays OUT of the image.
+pandas==3.0.2
+numpy==2.4.4
+fastapi==0.138.1
+uvicorn[standard]==0.49.0
+requests==2.33.1
+# (no python-dotenv: .env is loaded by detectors/alerts.py's dependency-free
+# loader, which the worker reuses; compose also injects .env via env_file)

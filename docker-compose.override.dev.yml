@@ -1,0 +1,22 @@
+# Dev override (Windows / Docker Desktop):
+#   docker compose -f docker-compose.yml -f docker-compose.override.dev.yml up
+#
+# Code is bind-mounted; --reload restarts the API on save, so editing
+# service/api.py or the dashboard is save -> F5. Worker code changes need
+# `docker compose restart worker`.
+#
+# NB (Windows): if this repo lives inside a OneDrive-synced folder, move it
+# out (or into the WSL2 filesystem) — bind mounts + file watching misbehave
+# under OneDrive.
+services:
+  api:
+    command: uvicorn service.api:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"   # inotify doesn't cross the Windows bind mount
+  worker:
+    volumes:
+      - .:/app
+    environment:
+      TTRRONEV_ALERTS_DRY_RUN: "1"       # dev: print alerts, don't DM Telegram

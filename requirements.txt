@@ -1,0 +1,31 @@
+# ttrronev — Python dependencies
+# Pin versions before going live; left unpinned during scaffolding for flexibility.
+
+# Exchange connectivity
+ccxt
+pybit                 # Bybit official SDK (PyPI package name is `pybit`, not `bybit`)
+requests
+
+# Data / numerics
+pandas
+numpy
+
+# Technical analysis
+ta
+backtrader
+
+# Machine learning
+scikit-learn
+xgboost
+lightgbm
+torch
+joblib
+
+# Plotting / reporting
+matplotlib
+
+# Config / environment
+python-dotenv
+
+# Web / API surface (for future dashboard or OpenClaw bridge endpoints)
+flask

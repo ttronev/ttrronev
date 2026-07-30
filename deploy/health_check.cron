@@ -1,0 +1,10 @@
+# External health-check cron — installs alongside the systemd service.
+# Pings /health every 5 min; sends a Telegram alert on 2 consecutive
+# failures (so we get notified independently of the bot itself, in case
+# the bot is hung but systemd hasn't restarted it yet).
+#
+# Install:  cp this file to /etc/cron.d/ttrronev-health
+# Then:    chmod 644 /etc/cron.d/ttrronev-health  &&  systemctl reload cron
+
+# CHANGE: set your Telegram creds in /opt/ttrronev/.env-cron (chmod 600)
+*/5 * * * * ttrronev /opt/ttrronev/deploy/health_check.sh >> /opt/ttrronev/paper_trade/logs/health_check.log 2>&1

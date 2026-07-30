@@ -1,0 +1,143 @@
+"""
+service/regen.py — fetch + windowed detector regeneration for one (pair, TF).
+
+Wraps the EXISTING detector stack without touching its logic:
+
+  * fetch      — data/freshness_monitor.check_and_update (OKX, closed bars only)
+  * detection  — detectors/range_detector_{tf}.run(), fed a WINDOWED CSV slice
+                 for the fast TFs (see service/pairs.REGEN_WINDOW_DAYS); 1d/1w
+                 run on full history. Windowing is done by writing a sliced
+                 copy of the raw CSV and passing its path into run() — the
+                 detector itself is unchanged.
+  * chain      — cleanness -> nesting -> known_at -> layer5 -> layer5.1, the
+                 load-bearing order from MEMORY_HYGIENE.md, at most once per
+                 CHAIN_MIN_INTERVAL_S (levels only change when a range ends).
+
+Window caveat (by design, per the service spec): a windowed run rebuilds
+detector state from the window's left edge, so ranges/EMA bias near that edge
+differ from a full-history run. Windows are sized (45d for 5m, 1y for 1h/2h,
+2y for 4h) so everything near current price is far inside the window. The
+FORWARD-LOOK CONTRACT (level_available_ts gating) is untouched.
+"""
+from __future__ import annotations
+import gc
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import pandas as pd
+
+from detectors import paths
+from service.pairs import MEMORY_TFS, REGEN_WINDOW_DAYS
+
+DAY_MS = 24 * 60 * 60 * 1000
+
+# TFs whose detector takes a separate 1h bias CSV (1h and 5m self-bias).
+_BIAS_TFS = {"1w", "1d", "4h", "2h"}
+
+
+def _tmp_dir(pair: str) -> Path:
+    d = paths.results_dir(pair) / ".tmp"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _window_slice(pair: str, tf: str, days: int, tag: str) -> Path:
+    """Write data/raw/{pair}_{tf}.csv restricted to the last `days` days into
+    the pair's .tmp dir and return the slice's path."""
+    src = paths.raw_csv(tf, pair)
+    df = pd.read_csv(src)
+    cutoff = int(df["timestamp"].max()) - days * DAY_MS
+    df = df[df["timestamp"] >= cutoff]
+    dst = _tmp_dir(pair) / f"{pair}_{tf}_{tag}.csv"
+    df.to_csv(dst, index=False)
+    n = len(df)
+    del df
+    gc.collect()
+    return dst
+
+
+def fetch_tf(pair: str, tf: str, log=print) -> int:
+    """Extend the raw CSV for one TF from OKX. Returns rows appended.
+
+    Calls okx_fetch.extend_csv DIRECTLY — not check_and_update — because the
+    freshness monitor's STALE_HOURS gate is a reactive heuristic (~2-6x the
+    bar interval) that never trips right at bar close; the worker KNOWS a bar
+    just closed, so it must fetch unconditionally. extend_csv is idempotent
+    (appends only ts > last CSV ts; returns 0 when nothing new).
+
+    A missing/empty raw CSV raises (FileNotFoundError from extend_csv) —
+    that's a config error the worker must alert on, never silently skip."""
+    from data.freshness_monitor import _okx, _base
+    n, _first, last_new = _okx.extend_csv(_base(pair), tf,
+                                          data_dir=ROOT / "data" / "raw")
+    if log and n:
+        import datetime as dt
+        last_s = dt.datetime.fromtimestamp(last_new / 1000, tz=dt.timezone.utc
+                                           ).strftime("%Y-%m-%d %H:%M UTC") if last_new else "?"
+        log(f"[regen] {pair} {tf}: +{n} bars (last {last_s})")
+    return int(n)
+
+
+def regen_detector(pair: str, tf: str, log=print) -> float:
+    """Run layer-1 detection for one TF (windowed where configured).
+    Returns the run's duration in seconds."""
+    t0 = time.monotonic()
+    days = REGEN_WINDOW_DAYS.get(tf)
+
+    if tf == "5m":
+        import detectors.range_detector_5m as mod
+        data = _window_slice(pair, "5m", days, "win") if days else None
+        mod.run(data_5m=data, pair=pair)
+    elif tf == "1h":
+        import detectors.range_detector_1h as mod
+        data = _window_slice(pair, "1h", days, "win") if days else None
+        mod.run(data_1h=data, pair=pair)
+    elif tf in _BIAS_TFS:
+        import importlib
+        mod = importlib.import_module(f"detectors.range_detector_{tf}")
+        kw = {"pair": pair}
+        if days:
+            kw[f"data_{tf}"] = _window_slice(pair, tf, days, "win")
+            kw["data_1h"] = _window_slice(pair, "1h", days, "win1h")
+        mod.run(**kw)
+    else:
+        raise ValueError(f"unknown service TF: {tf}")
+
+    gc.collect()
+    dt = time.monotonic() - t0
+    if log:
+        log(f"[regen] {pair} {tf}: layer-1 regenerated in {dt:.1f}s"
+            + (f" (window {days}d)" if days else " (full history)"))
+    return dt
+
+
+def regen_chain(pair: str, log=print) -> float:
+    """Re-run the derived chain for the memory TFs, in the load-bearing order.
+    MUST follow any detector re-run of a memory TF (the detector wipes the
+    cleanness/nesting/known_at fields; a partial chain silently empties the
+    level registry — see MEMORY_HYGIENE.md). Returns duration in seconds."""
+    t0 = time.monotonic()
+    import detectors.compute_cleanness as _cc
+    import detectors.cascade_nesting as _cn
+    import detectors.compute_known_at as _ck
+    import detectors.layer5_range_memory as _l5
+    import detectors.layer5_1_strength as _l51
+    for tf in MEMORY_TFS:
+        _cc.compute_for_tf(tf, pair)
+    _cn.run(verbose=False, pair=pair)
+    for tf in MEMORY_TFS:
+        _ck.compute_for_tf(tf, pair)
+    gc.collect()
+    _l5.run(verbose=False, pair=pair)
+    gc.collect()
+    _l51.run(verbose=False, pair=pair)
+    gc.collect()
+    dt = time.monotonic() - t0
+    if log:
+        log(f"[regen] {pair}: derived chain (cleanness->nesting->known_at->L5->L5.1) in {dt:.1f}s")
+    return dt
