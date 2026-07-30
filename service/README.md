@@ -27,6 +27,9 @@ worker  (python -m service.worker)   API  (uvicorn service.api:app)
 
 Raw candles stay flat: `data/raw/{PAIR}_{tf}.csv`.
 
+Requires Docker Compose >= 2.24 (the compose file uses the long
+`env_file: {path, required: false}` syntax).
+
 ## Dev (Windows, Docker Desktop)
 
 ```bash
