@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ttrronev — levels</title>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 <!-- Pinned chart lib (Apache-2.0; attribution in the footer). -->
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -15,7 +15,8 @@
     <select id="pair-select" aria-label="pair"></select>
     <button id="add-pair-btn" class="btn-ghost" title="добавить актив">+ добавить</button>
     <span id="add-pair-form" class="add-form" hidden>
-      <input id="add-pair-input" placeholder="LINK/USDT" size="10" spellcheck="false">
+      <textarea id="add-pair-input" rows="1" spellcheck="false"
+                placeholder="LINK/USDT или список через запятую"></textarea>
       <button id="add-pair-go" class="btn-ghost">OK</button>
       <button id="add-pair-cancel" class="btn-ghost">✕</button>
     </span>
@@ -81,6 +82,6 @@
   </span>
 </footer>
 
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

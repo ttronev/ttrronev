@@ -84,7 +84,44 @@ function initChart() {
   const fit = () => chart.resize(host.clientWidth, host.clientHeight);
   new ResizeObserver(fit).observe(host);
   fit();
+  chart.timeScale().subscribeVisibleLogicalRangeChange(maybeLoadOlder);
+  initPriceAxisZoom(host);
 }
+
+/* Price-axis wheel zoom (Stage 8b.5): wheel over the price scale scales the
+   auto range around its midpoint; dblclick on the axis resets. */
+let priceZoom = 1;
+
+function initPriceAxisZoom(host) {
+  series.applyOptions({
+    autoscaleInfoProvider: (original) => {
+      const res = original();
+      if (!res || !res.priceRange || priceZoom === 1) return res;
+      const { minValue, maxValue } = res.priceRange;
+      const mid = (minValue + maxValue) / 2;
+      const half = ((maxValue - minValue) / 2) * priceZoom;
+      return { ...res, priceRange: { minValue: mid - half, maxValue: mid + half } };
+    },
+  });
+  const overAxis = (e) => {
+    const paneW = host.clientWidth - chart.priceScale("right").width();
+    return e.offsetX > paneW;
+  };
+  host.addEventListener("wheel", (e) => {
+    if (!overAxis(e)) return;                  // pane wheel = lib's time zoom
+    e.preventDefault();
+    priceZoom = Math.min(20, Math.max(0.05, priceZoom * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
+    series.priceScale().applyOptions({ autoScale: true });   // re-run provider
+  }, { passive: false });
+  host.addEventListener("dblclick", (e) => {
+    if (!overAxis(e)) return;
+    priceZoom = 1;
+    series.priceScale().applyOptions({ autoScale: true });
+  });
+}
+
+const mapCandles = (candles) => candles.map(([ts, o, h, l, c]) => ({
+  time: ts / 1000, open: o, high: h, low: l, close: c }));
 
 async function loadCandles(pair, tf, { force = false } = {}) {
   const key = `${pair}:${tf}`;
@@ -92,11 +129,47 @@ async function loadCandles(pair, tf, { force = false } = {}) {
   if (hit && !force) return hit.candles;       // instant TF switch from cache
   const r = await fetch(`/api/candles/${pair}/${tf}?limit=500`, { cache: "no-store" });
   if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
-  const { candles } = await r.json();
-  const mapped = candles.map(([ts, o, h, l, c]) => ({
-    time: ts / 1000, open: o, high: h, low: l, close: c }));
-  candleCache[key] = { candles: mapped, fetchedAt: Date.now() };
-  return mapped;
+  const j = await r.json();
+  const mapped = mapCandles(j.candles);
+  if (hit && hit.candles.length) {
+    // Keep already-paged-in older history: splice the fresh tail onto it.
+    const cut = mapped.length ? mapped[0].time : Infinity;
+    const older = hit.candles.filter(b => b.time < cut);
+    candleCache[key] = { candles: older.concat(mapped), fetchedAt: Date.now(),
+                         hasMore: hit.hasMore, loadingOlder: false };
+  } else {
+    candleCache[key] = { candles: mapped, fetchedAt: Date.now(),
+                         hasMore: !!j.has_more, loadingOlder: false };
+  }
+  return candleCache[key].candles;
+}
+
+// Infinite left-scroll (Stage 8b): when < 100 bars remain left of the view,
+// page older candles in and re-setData — the lib keeps the visible TIME
+// range, so the viewport doesn't jump. One in-flight request max.
+async function maybeLoadOlder(range) {
+  if (!range || !currentPair || !series) return;
+  const key = `${currentPair}:${currentTF}`;
+  const c = candleCache[key];
+  if (!c || !c.hasMore || c.loadingOlder || !c.candles.length) return;
+  if (range.from >= 100) return;
+  c.loadingOlder = true;
+  try {
+    const before = Math.round(c.candles[0].time * 1000);
+    const r = await fetch(
+      `/api/candles/${currentPair}/${currentTF}?limit=500&before=${before}`,
+      { cache: "no-store" });
+    if (!r.ok) { c.hasMore = false; return; }
+    const j = await r.json();
+    const older = mapCandles(j.candles).filter(b => b.time < c.candles[0].time);
+    c.hasMore = !!j.has_more && older.length > 0;
+    if (older.length) {
+      c.candles = older.concat(c.candles);
+      series.setData(c.candles);
+      renderOverlays(c.candles);
+    }
+  } catch { /* transient — retry on next range change */ }
+  finally { c.loadingOlder = false; }
 }
 
 async function renderChart({ forceCandles = false } = {}) {
@@ -378,23 +451,37 @@ function scheduleBootstrapPoll() {
   poll();
 }
 
-async function addPair(symbol) {
+async function addPair(input) {
+  // Comma/newline-separated list -> batch POST (Stage 8b). Spaces stay
+  // inside a symbol ("link usdt" is one symbol).
   const err = $("add-pair-err");
   err.textContent = "";
+  const symbols = input.split(/[,\n;]+/).map(s => s.trim()).filter(Boolean);
+  if (!symbols.length) return false;
+  const body = symbols.length === 1 ? { symbol: symbols[0] } : { symbols };
   try {
     const r = await fetch("/api/pairs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol }),
+      body: JSON.stringify(body),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      err.textContent = j.detail || `HTTP ${r.status}`;
+      const d = j.detail;
+      err.textContent = typeof d === "string" ? d
+        : d && d.rejected ? d.rejected.map(x => `${x.symbol}: ${x.reason}`).join("; ")
+        : `HTTP ${r.status}`;
       return false;
     }
-    pendingAutoSwitch = j.pair || null;        // switch to it when ready
+    const queued = j.queued || [];
+    const rejected = j.rejected || [];
+    if (rejected.length) {
+      err.textContent = `отклонено: ` +
+        rejected.map(x => `${x.symbol} (${x.reason})`).join("; ");
+    }
+    pendingAutoSwitch = queued.length === 1 ? queued[0] : null;
     await loadRegistry();
-    return true;
+    return queued.length > 0;
   } catch (e) {
     err.textContent = `сеть: ${e.message}`;
     return false;
@@ -504,7 +591,9 @@ function initAddPair() {
     if (await addPair(v)) close();
   };
   $("add-pair-go").addEventListener("click", go);
-  $("add-pair-input").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  $("add-pair-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); }
+  });
 }
 
 function initOnce() {

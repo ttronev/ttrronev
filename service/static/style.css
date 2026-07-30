@@ -48,10 +48,14 @@ main {
 .topbar-mid { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 
-select, input {
+select, input, textarea {
   background: var(--surface); color: var(--text-primary);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 10px; font-size: 14px;
+}
+.add-form textarea {
+  resize: none; width: 240px; height: 34px; line-height: 20px;
+  font-family: inherit; vertical-align: middle;
 }
 .btn-ghost {
   background: transparent; color: var(--text-secondary);

@@ -32,7 +32,8 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from detectors import paths
-from service.pairs import MEMORY_TFS, REGEN_WINDOW_DAYS
+from service.pairs import (MEMORY_TFS, REGEN_WINDOW_DAYS,
+                           BACKFILL_5M_MAX_DAYS)
 
 DAY_MS = 24 * 60 * 60 * 1000
 
@@ -112,6 +113,81 @@ def bootstrap_tf(pair: str, tf: str, log=print) -> int:
         log(f"[bootstrap] {pair} {tf}: fetched {n} bars "
             f"({'full history' if not days else f'{days}d window'})")
     return n
+
+
+def _prepend_rows_to_csv(csv_path, rows) -> int:
+    """Prepend older-than-existing OHLCV rows to a CSV by streaming: header +
+    new rows + existing data bytes. Never parses the existing file (a legacy
+    5m CSV is ~80MB). Atomic via same-dir temp + os.replace."""
+    import csv as _csv
+    import os as _os
+    tmp = csv_path.with_name(f".{csv_path.name}.bf{_os.getpid()}")
+    with csv_path.open("rb") as src:
+        header = src.readline().decode("utf-8", errors="replace")
+        with tmp.open("w", newline="", encoding="utf-8") as out:
+            out.write(header if header.strip()
+                      else "timestamp,open,high,low,close,volume\n")
+            _csv.writer(out).writerows(rows)
+        with tmp.open("ab") as outb:            # existing data, streamed
+            while True:
+                chunk = src.read(1 << 20)
+                if not chunk:
+                    break
+                outb.write(chunk)
+    _os.replace(tmp, csv_path)
+    return len(rows)
+
+
+def backfill_tf(pair: str, tf: str, batch_candles: int = 1000,
+                max_batches: int = 5, log=print) -> str:
+    """One deep-backfill slice for chart history (Stage 8b): fetch up to
+    max_batches x batch_candles older candles BEFORE the CSV's first row and
+    prepend them. Writes ONLY data/raw — detectors keep their own windows.
+    5m is capped at BACKFILL_5M_MAX_DAYS. Returns 'complete' | 'partial'."""
+    import time as _t
+    from data.freshness_monitor import _okx
+    csv_path = paths.raw_csv(tf, pair)
+    if not csv_path.exists():
+        return "complete"                       # nothing to extend backwards
+    first_ts = None
+    with csv_path.open("rb") as f:
+        for _ in range(3):
+            line = f.readline().decode("utf-8", errors="replace")
+            try:
+                first_ts = int(line.split(",", 1)[0])
+                break
+            except ValueError:
+                continue
+    if first_ts is None:
+        return "complete"
+    floor_ms = None
+    if tf == "5m":
+        floor_ms = int(_t.time() * 1000) - BACKFILL_5M_MAX_DAYS * DAY_MS
+        if first_ts <= floor_ms:
+            return "complete"
+    inst = paths.okx_inst_id(pair)
+    total = 0
+    for _ in range(max_batches):
+        rows = _okx.fetch_okx_candles(
+            inst, _okx.TF_TO_OKX[tf],
+            start_ms=floor_ms, end_ms=first_ts - 1,
+            max_pages=max(1, batch_candles // 100))
+        rows = [r for r in rows if r[0] < first_ts]
+        if not rows:
+            if log and total:
+                log(f"[backfill] {pair} {tf}: +{total} bars (reached listing)")
+            return "complete"
+        _prepend_rows_to_csv(csv_path, rows)
+        total += len(rows)
+        first_ts = rows[0][0]
+        if floor_ms is not None and first_ts <= floor_ms:
+            if log:
+                log(f"[backfill] {pair} {tf}: +{total} bars (reached {BACKFILL_5M_MAX_DAYS}d cap)")
+            return "complete"
+        _t.sleep(1.0)                           # politeness between batches
+    if log and total:
+        log(f"[backfill] {pair} {tf}: +{total} bars (more remains)")
+    return "partial"
 
 
 def regen_detector(pair: str, tf: str, log=print) -> float:

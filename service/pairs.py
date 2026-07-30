@@ -63,3 +63,17 @@ LIVE_PRICE_INTERVAL_S = 15
 
 # Same worker error is re-alerted to Telegram at most once per this.
 ERROR_ALERT_COOLDOWN_S = 3600
+
+# 5m pass over the whole universe: warn (log + Telegram) past this many
+# seconds. Override per environment: TTRRONEV_CYCLE_WARN_S.
+CYCLE_WARN_S_DEFAULT = 240
+
+# Pause between pairs inside a pass (jitter base + random up to the same
+# again) so the exchange API isn't hit in one aligned burst at bar close.
+PAIR_JITTER_S = 1.0
+
+# Deep-backfill (Stage 8b): raw-CSV-only history for chart viewing.
+# Detectors keep their regen windows untouched. 5m never deeper than this.
+BACKFILL_5M_MAX_DAYS = 180
+BACKFILL_ORDER = ["1d", "1w", "4h", "2h", "1h", "5m"]   # cheap first
+

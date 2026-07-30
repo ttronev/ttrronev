@@ -74,7 +74,8 @@ def _read_cached(path: Path) -> dict | None:
 
 # ------------------------------------------------------------------- pairs
 class AddPairBody(BaseModel):
-    symbol: str
+    symbol: str | None = None
+    symbols: list[str] | None = None
 
 
 @app.get("/api/pairs")
@@ -85,18 +86,44 @@ def api_pairs():
 
 @app.post("/api/pairs", status_code=201)
 def api_add_pair(body: AddPairBody):
-    try:
-        pair = registry.normalize_symbol(body.symbol)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    ok, reason = registry.validate_symbol_okx(pair)
-    if not ok:
-        raise HTTPException(status_code=422, detail=reason)
-    try:
-        entry = registry.add_pair(pair)
-    except KeyError as e:
-        raise HTTPException(status_code=409, detail=str(e.args[0]))
-    return entry
+    """Single {"symbol"} or batch {"symbols": [...]} (Stage 8b). Invalid
+    symbols never block the valid ones: response is {queued, rejected}.
+    All-rejected -> 422 (single-symbol callers keep their readable error)."""
+    raw_list = body.symbols if body.symbols is not None else (
+        [body.symbol] if body.symbol else [])
+    if not raw_list:
+        raise HTTPException(status_code=422, detail="no symbol(s) given")
+    queued, rejected = [], []
+    seen = set()
+    for raw in raw_list:
+        try:
+            pair = registry.normalize_symbol(raw)
+        except ValueError as e:
+            rejected.append({"symbol": raw, "reason": str(e)})
+            continue
+        if pair in seen:
+            rejected.append({"symbol": raw, "reason": "duplicate in request"})
+            continue
+        seen.add(pair)
+        ok, reason = registry.validate_symbol_okx(pair)
+        if not ok:
+            rejected.append({"symbol": raw, "reason": reason})
+            continue
+        try:
+            registry.add_pair(pair)
+            queued.append(pair)
+        except KeyError as e:
+            rejected.append({"symbol": raw, "reason": str(e.args[0])})
+    if not queued:
+        # single-symbol callers keep the 8.1 contract: 409 for an existing
+        # pair, 422 with a plain readable string otherwise
+        if len(rejected) == 1:
+            reason = rejected[0]["reason"]
+            code = 409 if "already in registry" in reason else 422
+            raise HTTPException(status_code=code, detail=reason)
+        raise HTTPException(status_code=422,
+                            detail={"queued": [], "rejected": rejected})
+    return {"queued": queued, "rejected": rejected}
 
 
 @app.delete("/api/pairs/{pair}")
@@ -148,6 +175,95 @@ def api_state(pair: str):
 
 
 # ----------------------------------------------------------------- candles
+_first_ts_cache: dict[str, tuple[int, int | None]] = {}
+
+
+def _file_first_ts(csv_path: Path) -> int | None:
+    """Timestamp of the first data row (mtime-cached)."""
+    key = str(csv_path)
+    mtime = csv_path.stat().st_mtime_ns
+    hit = _first_ts_cache.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    ts = None
+    with csv_path.open("rb") as f:
+        for _ in range(3):                     # header + tolerance
+            line = f.readline().decode("utf-8", errors="replace")
+            try:
+                ts = int(line.split(",", 1)[0])
+                break
+            except ValueError:
+                continue
+    _first_ts_cache[key] = (mtime, ts)
+    return ts
+
+
+def _parse_rows(raw: str, drop_torn_tail: bool) -> list:
+    lines = raw.splitlines()
+    if drop_torn_tail and raw and not raw.endswith(("\n", "\r")):
+        lines = lines[:-1]
+    rows = []
+    for line in lines:
+        parts = line.split(",")
+        if len(parts) < 6:
+            continue
+        try:
+            rows.append([int(parts[0]), float(parts[1]), float(parts[2]),
+                         float(parts[3]), float(parts[4]), float(parts[5])])
+        except ValueError:
+            continue
+    rows.sort(key=lambda r: r[0])
+    dedup = []
+    for r in rows:
+        if dedup and dedup[-1][0] == r[0]:
+            dedup[-1] = r
+        else:
+            dedup.append(r)
+    return dedup
+
+
+def _read_candles_before(csv_path: Path, before_ms: int, limit: int) -> tuple[list, bool]:
+    """Last `limit` rows strictly BEFORE before_ms, via a byte-offset binary
+    search (never parses the whole file — a legacy 5m CSV is ~80MB).
+    Returns (rows, has_more)."""
+    size = csv_path.stat().st_size
+    with csv_path.open("rb") as f:
+        def ts_at(pos: int):
+            """ts of the first complete line at/after byte pos."""
+            f.seek(pos)
+            if pos:
+                f.readline()                    # skip partial line
+            for _ in range(3):
+                line = f.readline().decode("utf-8", errors="replace")
+                if not line:
+                    return None
+                try:
+                    return int(line.split(",", 1)[0])
+                except ValueError:
+                    continue                    # header line
+            return None
+
+        lo, hi = 0, size                        # find ~byte pos of before_ms
+        while hi - lo > 4096:
+            mid = (lo + hi) // 2
+            t = ts_at(mid)
+            if t is None or t >= before_ms:
+                hi = mid
+            else:
+                lo = mid
+        want = max(limit * 200, 65536)
+        start = max(0, hi - want)
+        f.seek(start)
+        if start:
+            f.readline()
+        raw = f.read(min(size - start, want + 65536)).decode("utf-8", errors="replace")
+    rows = [r for r in _parse_rows(raw, drop_torn_tail=False) if r[0] < before_ms]
+    rows = rows[-limit:]
+    first_ts = _file_first_ts(csv_path)
+    has_more = bool(rows) and first_ts is not None and rows[0][0] > first_ts
+    return rows, has_more
+
+
 def _read_candle_tail(csv_path: Path, limit: int) -> list:
     """Last `limit` [ts,o,h,l,c,v] rows. Reads only the file's tail bytes
     (a 5m CSV is tens of MB; parsing it whole per request would be silly),
@@ -165,36 +281,18 @@ def _read_candle_tail(csv_path: Path, limit: int) -> list:
             f.seek(size - want)
             f.readline()                       # drop the partial first line
         raw = f.read().decode("utf-8", errors="replace")
-    lines = raw.splitlines()
-    # A file not ending in a newline is mid-append: the last line may be a
-    # torn row that would parse as a wrong-but-valid candle. Drop it.
-    if raw and not raw.endswith(("\n", "\r")):
-        lines = lines[:-1]
-    rows = []
-    for line in lines:
-        parts = line.split(",")
-        if len(parts) < 6:
-            continue
-        try:
-            rows.append([int(parts[0]), float(parts[1]), float(parts[2]),
-                         float(parts[3]), float(parts[4]), float(parts[5])])
-        except ValueError:
-            continue                            # header / garbage line
-    rows.sort(key=lambda r: r[0])
-    # Dedup on ts (keep last occurrence) — cheap since already sorted.
-    dedup = []
-    for r in rows:
-        if dedup and dedup[-1][0] == r[0]:
-            dedup[-1] = r
-        else:
-            dedup.append(r)
-    tail = dedup[-CANDLES_CAP:]
+    # A file not ending in a newline is mid-append: the torn last row is
+    # dropped by the parser.
+    tail = _parse_rows(raw, drop_torn_tail=True)[-CANDLES_CAP:]
     _candle_cache[key] = (mtime, tail)
     return tail[-limit:]
 
 
 @app.get("/api/candles/{pair}/{tf}")
-def api_candles(pair: str, tf: str, limit: int = CANDLES_DEFAULT):
+def api_candles(pair: str, tf: str, limit: int = CANDLES_DEFAULT,
+                before: int | None = None):
+    """Last `limit` bars; `before` (ms) pages back in time (Stage 8b).
+    `has_more` says whether older data exists on disk."""
     if registry.get(pair) is None:
         raise HTTPException(status_code=404, detail=f"unknown pair: {pair}")
     if tf not in WORKER_TFS:
@@ -202,11 +300,16 @@ def api_candles(pair: str, tf: str, limit: int = CANDLES_DEFAULT):
     csv_path = paths.raw_csv(tf, pair)
     limit = max(1, min(int(limit), CANDLES_CAP))
     try:
-        candles = _read_candle_tail(csv_path, limit)
+        if before is not None:
+            candles, has_more = _read_candles_before(csv_path, int(before), limit)
+        else:
+            candles = _read_candle_tail(csv_path, limit)
+            first_ts = _file_first_ts(csv_path)
+            has_more = bool(candles) and first_ts is not None and candles[0][0] > first_ts
     except OSError:                 # missing / vanished mid-read -> 404, not 500
         raise HTTPException(status_code=404,
                             detail=f"no candle data for {pair} {tf} yet")
-    return {"pair": pair, "tf": tf, "candles": candles}
+    return {"pair": pair, "tf": tf, "candles": candles, "has_more": has_more}
 
 
 # ------------------------------------------------------------------ health

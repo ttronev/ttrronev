@@ -38,6 +38,7 @@ truth the missed tick would have.
 from __future__ import annotations
 import asyncio
 import os
+import random
 import sys
 import time
 import traceback
@@ -57,10 +58,18 @@ from service.ioutil import atomic_write_json, read_json
 from service.pairs import (
     WORKER_TFS, MEMORY_TFS, TF_MS,
     ERROR_ALERT_COOLDOWN_S, FETCH_RETRY_DELAY_S, LIVE_PRICE_INTERVAL_S,
+    CYCLE_WARN_S_DEFAULT, PAIR_JITTER_S, BACKFILL_ORDER,
 )
+from service.sharding import shard_pairs
 
 REGISTRY_POLL_S = 10            # how often the worker re-reads pairs.json
 BOOTSTRAP_TF_PAUSE_S = 1.0      # politeness pause between bootstrap TF steps
+
+# 5m pass budget (log + Telegram warning past this). Env-overridable so the
+# acceptance test can trip it deliberately.
+CYCLE_WARN_S = float(os.environ.get("TTRRONEV_CYCLE_WARN_S", CYCLE_WARN_S_DEFAULT))
+
+BACKFILL_STATE_PATH = None      # resolved lazily via paths (see _backfill_state)
 
 REGEN_5M_BUDGET_S = 60          # spec: full 5m cycle must fit in this
 
@@ -260,11 +269,33 @@ class Worker:
             except Exception as e2:
                 self.report_error(f"{pair}:bootstrap:registry-write", e2)
 
+    # ---------------------------------------------------------- backfill
+    def _backfill_state_file(self):
+        return paths.ROOT / "detectors" / "results" / "backfill_state.json"
+
+    def _next_backfill(self):
+        """Next (pair, tf) whose deep history isn't complete, cheap TFs
+        first (Stage 8b: raw-CSV-only depth for chart viewing)."""
+        state = read_json(self._backfill_state_file(), default={}) or {}
+        for pair in self._my_pairs():
+            for tf in BACKFILL_ORDER:
+                if state.get(pair, {}).get(tf) != "complete":
+                    return pair, tf
+        return None
+
+    def _backfill_slice_sync(self, pair: str, tf: str) -> None:
+        res = regen.backfill_tf(pair, tf, log=log)
+        if res == "complete":
+            state = read_json(self._backfill_state_file(), default={}) or {}
+            state.setdefault(pair, {})[tf] = "complete"
+            atomic_write_json(self._backfill_state_file(), state)
+
     async def registry_loop(self) -> None:
         """Re-read pairs.json every REGISTRY_POLL_S (by mtime) and bootstrap
         new pairs strictly one at a time, oldest added_ts first. Also stamps
         the worker-level heartbeat so /api/health can detect a dead worker
-        even when no pair is ready yet (first bootstrap, all-error)."""
+        even when no pair is ready yet, and — when NO bootstrap is pending —
+        runs one low-priority deep-backfill slice per pass."""
         last_mtime = -1
         while True:
             try:
@@ -274,13 +305,25 @@ class Worker:
                 m = registry.mtime_ns()
                 if m != last_mtime:
                     last_mtime = m
+                    entries = registry.load()
+                    mine = set(shard_pairs([e["pair"] for e in entries]))
                     pending = sorted(
-                        (e for e in registry.load()
-                         if e.get("status") == registry.BOOTSTRAPPING),
+                        (e for e in entries
+                         if e.get("status") == registry.BOOTSTRAPPING
+                         and e["pair"] in mine),
                         key=lambda e: e.get("added_ts", ""))
                     for e in pending:
                         await self.bootstrap_pair(e["pair"])   # sequential = the queue
                         last_mtime = -1                        # re-read after each
+                # Deep backfill only when the bootstrap queue is idle.
+                still_pending = any(e.get("status") == registry.BOOTSTRAPPING
+                                    for e in registry.load())
+                if not still_pending:
+                    nxt = self._next_backfill()
+                    if nxt:
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(
+                            self.regen_pool, self._backfill_slice_sync, *nxt)
             except Exception as e:
                 self.report_error("registry-loop", e)
             await asyncio.sleep(REGISTRY_POLL_S)
@@ -309,18 +352,39 @@ class Worker:
         })
 
     # ------------------------------------------------------------ async loops
+    def _my_pairs(self) -> list[str]:
+        """Ready pairs this worker serves (PAIRS_SHARD filtered; default
+        0/1 = everything — sharding is prep, not active scaling)."""
+        return shard_pairs(registry.ready_pairs())
+
     async def five_min_loop(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
             now_ms = int(time.time() * 1000)
             run_at = scheduler.next_run_at_ms("5m", now_ms)
             await asyncio.sleep(max(0.0, (run_at - now_ms) / 1000))
-            for pair in registry.ready_pairs():
+            t0 = time.monotonic()
+            per_pair = []
+            for i, pair in enumerate(self._my_pairs()):
+                if i:                          # jitter: no aligned API bursts
+                    await asyncio.sleep(PAIR_JITTER_S + random.random() * PAIR_JITTER_S)
+                tp = time.monotonic()
                 try:
                     await loop.run_in_executor(
                         self.regen_pool, self._cycle_5m_sync, pair)
                 except Exception as e:
                     self.report_error(f"{pair}:5m:cycle", e)
+                per_pair.append((pair, time.monotonic() - tp))
+            if per_pair:
+                total = time.monotonic() - t0
+                breakdown = ", ".join(f"{p}: {d:.1f}s" for p, d in per_pair)
+                log(f"[worker] 5m pass: total {total:.1f}s over "
+                    f"{len(per_pair)} pair(s) ({breakdown})")
+                if total > CYCLE_WARN_S:
+                    self.report_error(
+                        "5m-pass-budget",
+                        RuntimeError(f"5m pass took {total:.1f}s over "
+                                     f"{len(per_pair)} pairs (> {CYCLE_WARN_S:.0f}s)"))
 
     async def structural_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -329,7 +393,9 @@ class Worker:
             run_at = scheduler.next_run_at_ms("1h", now_ms)
             boundary_ms = run_at - scheduler.CLOSE_BUFFER_MS
             await asyncio.sleep(max(0.0, (run_at - now_ms) / 1000))
-            for pair in registry.ready_pairs():
+            for i, pair in enumerate(self._my_pairs()):
+                if i:
+                    await asyncio.sleep(PAIR_JITTER_S + random.random() * PAIR_JITTER_S)
                 try:
                     await loop.run_in_executor(
                         self.regen_pool, self._structural_cycle_sync, pair, boundary_ms)
@@ -339,7 +405,7 @@ class Worker:
     async def live_loop(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
-            for pair in registry.ready_pairs():
+            for pair in self._my_pairs():
                 try:
                     await loop.run_in_executor(self.live_pool, self._live_sync, pair)
                 except Exception as e:
