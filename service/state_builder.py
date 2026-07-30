@@ -130,7 +130,7 @@ def _levels(state, ref_price: float):
     return out
 
 
-def _events(state):
+def _events(state, hours=24):
     return [{
         "tf": e["tf"],
         "ts": e["ts"],
@@ -138,7 +138,7 @@ def _events(state):
         "level_price": e["level_price"],
         "source_range_id": e["source_range_id"],
         "bar_close": e["bar_close"],
-    } for e in state.recent_events(hours=24, types=EVENT_TYPES)]
+    } for e in state.recent_events(hours=hours, types=EVENT_TYPES)]
 
 
 def build_state(pair: str, state=None, live_price: float | None = None) -> dict:
@@ -162,7 +162,10 @@ def build_state(pair: str, state=None, live_price: float | None = None) -> dict:
         "active_ranges": {tf: (_active_range(state, tf) if tf in state._l1 else None)
                           for tf in WORKER_TFS},
         "levels": _levels(state, ref),
-        "recent_events_24h": _events(state),
+        "recent_events_24h": _events(state, hours=24),
+        # 7-day window feeds the chart's event markers (same event stream,
+        # wider slice — no new analytics).
+        "recent_events_7d": _events(state, hours=7 * 24),
     }
 
 

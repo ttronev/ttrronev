@@ -83,6 +83,37 @@ def fetch_tf(pair: str, tf: str, log=print) -> int:
     return int(n)
 
 
+def bootstrap_tf(pair: str, tf: str, log=print) -> int:
+    """Fetch a NEW pair's history for one TF from OKX (Stage 8.1). Unlike
+    fetch_tf, this can start from an empty/missing CSV: it fetches the
+    regen window (full history for 1d/1w) with a small margin and writes
+    the CSV from scratch. Idempotent — an existing CSV is just extended.
+    Rate limits are respected by okx_fetch's per-page sleep. Returns rows
+    added."""
+    import time as _t
+    from data.freshness_monitor import _okx
+    csv_path = paths.raw_csv(tf, pair)
+    if csv_path.exists() and _okx.read_last_ts_ms(csv_path):
+        return fetch_tf(pair, tf, log=log)
+    # 1h gets FULL history (not its 1y regen window): it is the bias input
+    # for the full-history 1d/1w detectors and the source of the 4h regen's
+    # 2y slice — matching what the seed pairs have.
+    days = None if tf == "1h" else REGEN_WINDOW_DAYS.get(tf)
+    start_ms = None
+    if days:
+        start_ms = int(_t.time() * 1000) - (days + 3) * DAY_MS   # +3d margin
+    inst = paths.okx_inst_id(pair)
+    rows = _okx.fetch_okx_candles(inst, _okx.TF_TO_OKX[tf], start_ms=start_ms)
+    if not rows:
+        raise RuntimeError(f"bootstrap {pair} {tf}: OKX returned no candles")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    n = _okx.append_to_csv(csv_path, rows)
+    if log:
+        log(f"[bootstrap] {pair} {tf}: fetched {n} bars "
+            f"({'full history' if not days else f'{days}d window'})")
+    return n
+
+
 def regen_detector(pair: str, tf: str, log=print) -> float:
     """Run layer-1 detection for one TF (windowed where configured).
     Returns the run's duration in seconds."""

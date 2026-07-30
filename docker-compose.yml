@@ -19,7 +19,9 @@ services:
     command: uvicorn service.api:app --host 0.0.0.0 --port 8000
     volumes:
       - ./data:/app/data:ro
-      - ./detectors/results:/app/detectors/results:ro
+      # rw since Stage 8: the API writes the pair registry (pairs.json);
+      # everything else under results/ is still worker-owned.
+      - ./detectors/results:/app/detectors/results
     ports:
       - "127.0.0.1:8000:8000"   # localhost only; Caddy proxies + auths outside
     depends_on: [worker]

@@ -4,70 +4,83 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ttrronev — levels</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=10">
+<!-- Pinned chart lib (Apache-2.0; attribution in the footer). -->
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <header class="topbar">
   <div class="brand">ttrronev <span class="brand-sub">structure monitor</span></div>
-  <div class="topbar-right">
-    <span id="health-dot" class="health-dot" role="status" title="worker health">● …</span>
+  <div class="topbar-mid">
     <select id="pair-select" aria-label="pair"></select>
+    <button id="add-pair-btn" class="btn-ghost" title="добавить актив">+ добавить</button>
+    <span id="add-pair-form" class="add-form" hidden>
+      <input id="add-pair-input" placeholder="LINK/USDT" size="10" spellcheck="false">
+      <button id="add-pair-go" class="btn-ghost">OK</button>
+      <button id="add-pair-cancel" class="btn-ghost">✕</button>
+    </span>
+    <span id="add-pair-err" class="add-err" role="alert"></span>
+  </div>
+  <div class="topbar-right">
+    <nav class="tf-switch" id="tf-switch" aria-label="timeframe"></nav>
+    <span id="health-dot" class="health-dot" role="status" title="worker health">● …</span>
   </div>
 </header>
 
+<div id="stale-banner" class="stale-banner" hidden>
+  данные устарели — воркер не обновлял 5m дольше 15 минут
+</div>
+
 <main>
-  <section class="hero">
+  <section class="chart-panel">
+    <div id="chart" class="chart"></div>
+    <div class="chart-toolbar">
+      <label><input type="checkbox" id="tg-strong" checked> сильные</label>
+      <label><input type="checkbox" id="tg-weak" checked> слабые</label>
+      <label><input type="checkbox" id="tg-ranges" checked> диапазоны</label>
+      <label><input type="checkbox" id="tg-events" checked> события</label>
+    </div>
+  </section>
+
+  <aside class="side">
     <div class="tile tile-price">
       <div class="tile-label">live price <span id="live-ok" class="live-ok"></span></div>
       <div class="tile-value" id="live-price">—</div>
       <div class="tile-foot" id="live-ts">waiting for data…</div>
     </div>
     <div class="tile">
-      <div class="tile-label">trend 1D</div>
-      <div class="tile-value trend" id="trend-1d">—</div>
-      <div class="tile-foot" id="regime-1d">—</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">trend 4H</div>
-      <div class="tile-value trend" id="trend-4h">—</div>
-      <div class="tile-foot" id="regime-4h">—</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">last 1H close</div>
-      <div class="tile-value" id="close-1h">—</div>
+      <div class="state-row"><span class="tile-label">trend 1D</span>
+        <span class="trend" id="trend-1d">—</span><span class="regime" id="regime-1d"></span></div>
+      <div class="state-row"><span class="tile-label">trend 4H</span>
+        <span class="trend" id="trend-4h">—</span><span class="regime" id="regime-4h"></span></div>
+      <div class="state-row"><span class="tile-label">1H close</span>
+        <span id="close-1h">—</span></div>
       <div class="tile-foot" id="generated-at">—</div>
     </div>
-  </section>
-
-  <section class="panel">
-    <h2>Active ranges</h2>
-    <div id="ranges"></div>
-  </section>
-
-  <div class="two-col">
-    <section class="panel">
-      <h2>Levels <span class="h2-sub">sorted by distance from live; ≤1.5% flagged</span></h2>
+    <div class="tile levels-tile">
+      <div class="tile-label">ближайшие уровни</div>
       <div class="table-wrap">
         <table id="levels-table">
-          <thead>
-            <tr><th>price</th><th>dist</th><th>TF</th><th>S/R</th><th>strength</th><th>last event</th></tr>
-          </thead>
+          <thead><tr><th>price</th><th>dist</th><th>TF</th><th>S/R</th><th>сила</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
-    </section>
-
-    <section class="panel">
-      <h2>Events <span class="h2-sub">last 24h, all TFs</span></h2>
-      <ul id="events-feed" class="feed"></ul>
-    </section>
-  </div>
+    </div>
+  </aside>
 </main>
+
+<div id="bootstrap-bar" class="bootstrap-bar" hidden>
+  <span id="bootstrap-text"></span>
+  <span class="bootstrap-progress"><span id="bootstrap-fill"></span></span>
+</div>
 
 <footer class="foot">
   <span id="foot-status">—</span>
+  <span class="foot-right">
+    <a href="https://www.tradingview.com/" target="_blank" rel="noopener">Charts by TradingView</a>
+  </span>
 </footer>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

@@ -17,6 +17,11 @@ One asyncio process, two regen loops per pair plus a live-price poller:
                  construction — no interval arithmetic.
   live loop    — every LIVE_PRICE_INTERVAL_S: OKX ticker → live.json
                  (display + proximity only; never detection input).
+  registry     — every ~10s re-reads detectors/results/pairs.json (Stage
+  loop           8.1); a pair with status=bootstrapping is bootstrapped
+                 strictly one at a time (1h CSV first for bias, then
+                 1w→1d→4h→2h→1h→5m, chain + state after the memory TFs),
+                 then joins the bar-close cycles as ready.
 
 All regen work runs on a single-thread executor: strictly serialized (the
 chain order is load-bearing; the box is RAM-constrained). Every published
@@ -47,12 +52,15 @@ import pandas as pd
 
 from detectors import paths
 from detectors.alerts import _load_dotenv, _telegram_send
-from service import regen, scheduler
+from service import regen, registry, scheduler
 from service.ioutil import atomic_write_json, read_json
 from service.pairs import (
-    PAIRS, WORKER_TFS, MEMORY_TFS, TF_MS,
+    WORKER_TFS, MEMORY_TFS, TF_MS,
     ERROR_ALERT_COOLDOWN_S, FETCH_RETRY_DELAY_S, LIVE_PRICE_INTERVAL_S,
 )
+
+REGISTRY_POLL_S = 10            # how often the worker re-reads pairs.json
+BOOTSTRAP_TF_PAUSE_S = 1.0      # politeness pause between bootstrap TF steps
 
 REGEN_5M_BUDGET_S = 60          # spec: full 5m cycle must fit in this
 
@@ -114,7 +122,10 @@ class Worker:
         hb.update({"pair": pair, "tfs": stamped, "updated_at": now_iso})
         atomic_write_json(paths.heartbeat_json(pair), hb)
 
-    def _rebuild_state_and_alerts(self, pair: str) -> None:
+    def _rebuild_state_and_alerts(self, pair: str, seed_alerts: bool = False) -> None:
+        """seed_alerts=True (bootstrap): prime the dedup state SILENTLY —
+        a brand-new pair has no alerts_state.json, so a normal scan would
+        burst out every recent historical event as a fresh Telegram DM."""
         from detectors.query_state import State
         from detectors import alerts
         from service.state_builder import write_state
@@ -126,9 +137,14 @@ class Worker:
             state.live_ok = True
         write_state(pair, state=state, live_price=live_px)
         fired = self.alert_fired.get(pair)
-        _, fired = alerts.run_once(dry_run=ALERTS_DRY_RUN, fired=fired,
-                                   log=lambda m: log(f"[alerts] {m}"),
-                                   pair=pair, state=state)
+        if seed_alerts:
+            _, fired = alerts.run_once(dry_run=True, fired=fired,
+                                       log=lambda m: None, pair=pair, state=state)
+            alerts._save_state(fired, pair)     # persist the primed dedup map
+        else:
+            _, fired = alerts.run_once(dry_run=ALERTS_DRY_RUN, fired=fired,
+                                       log=lambda m: log(f"[alerts] {m}"),
+                                       pair=pair, state=state)
         self.alert_fired[pair] = fired
 
     def _cycle_5m_sync(self, pair: str) -> None:
@@ -190,6 +206,85 @@ class Worker:
         log(f"[worker] {pair} structural: due={due} regenerated={regen_tfs} "
             f"in {time.monotonic() - t0:.1f}s")
 
+    # ---------------------------------------------------------- bootstrap
+    def _bootstrap_step_sync(self, pair: str, tf: str) -> None:
+        """One TF step of a new pair's bootstrap (runs on the regen executor).
+        Fetches the TF's history window and regenerates its detector."""
+        regen.bootstrap_tf(pair, tf, log=log)
+        regen.regen_detector(pair, tf, log=log)
+
+    async def bootstrap_pair(self, pair: str) -> None:
+        """Bootstrap one new pair: 1h CSV first (it is the bias input for
+        every older-TF detector), then the spec order 1w→1d→4h→2h→1h→5m,
+        chain + state after the memory TFs, ready at the end. Each TF step
+        is a separate executor job so ready pairs' bar-close cycles
+        interleave with a long bootstrap."""
+        loop = asyncio.get_running_loop()
+        log(f"[bootstrap] {pair}: starting")
+
+        def _seed_state():
+            self._rebuild_state_and_alerts(pair, seed_alerts=True)
+
+        try:
+            if registry.get(pair) is None:      # deleted while queued
+                log(f"[bootstrap] {pair}: removed from registry; skipping")
+                return
+            await loop.run_in_executor(self.regen_pool, regen.bootstrap_tf, pair, "1h", log)
+            for tf in ["1w", "1d", "4h", "2h", "1h"]:
+                if registry.get(pair) is None:
+                    log(f"[bootstrap] {pair}: removed from registry; aborting")
+                    return
+                await loop.run_in_executor(self.regen_pool, self._bootstrap_step_sync, pair, tf)
+                registry.mark_tf_ready(pair, tf)
+                await asyncio.sleep(BOOTSTRAP_TF_PAUSE_S)
+            if registry.get(pair) is None:
+                log(f"[bootstrap] {pair}: removed from registry; aborting")
+                return
+            await loop.run_in_executor(self.regen_pool, regen.regen_chain, pair, log)
+            await loop.run_in_executor(self.regen_pool, _seed_state)
+            if registry.get(pair) is None:
+                return
+            await loop.run_in_executor(self.regen_pool, self._bootstrap_step_sync, pair, "5m")
+            registry.mark_tf_ready(pair, "5m")
+            await loop.run_in_executor(self.regen_pool, _seed_state)
+            await loop.run_in_executor(self.regen_pool, self._heartbeat, pair, WORKER_TFS)
+            registry.update_entry(pair, status=registry.READY)
+            log(f"[bootstrap] {pair}: READY")
+        except Exception as e:
+            # Report FIRST — the registry write below can itself fail (full
+            # volume etc.) and must never take down the loop unalerted.
+            self.report_error(f"{pair}:bootstrap", e)
+            try:
+                registry.update_entry(pair, status=registry.ERROR,
+                                      error_reason=str(e)[:200])
+            except Exception as e2:
+                self.report_error(f"{pair}:bootstrap:registry-write", e2)
+
+    async def registry_loop(self) -> None:
+        """Re-read pairs.json every REGISTRY_POLL_S (by mtime) and bootstrap
+        new pairs strictly one at a time, oldest added_ts first. Also stamps
+        the worker-level heartbeat so /api/health can detect a dead worker
+        even when no pair is ready yet (first bootstrap, all-error)."""
+        last_mtime = -1
+        while True:
+            try:
+                atomic_write_json(
+                    paths.ROOT / "detectors" / "results" / "worker_heartbeat.json",
+                    {"updated_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")})
+                m = registry.mtime_ns()
+                if m != last_mtime:
+                    last_mtime = m
+                    pending = sorted(
+                        (e for e in registry.load()
+                         if e.get("status") == registry.BOOTSTRAPPING),
+                        key=lambda e: e.get("added_ts", ""))
+                    for e in pending:
+                        await self.bootstrap_pair(e["pair"])   # sequential = the queue
+                        last_mtime = -1                        # re-read after each
+            except Exception as e:
+                self.report_error("registry-loop", e)
+            await asyncio.sleep(REGISTRY_POLL_S)
+
     def _startup_sync(self, pair: str) -> None:
         """Cold start: fetch + regen every TF once so state.json exists."""
         log(f"[worker] {pair}: startup regen of {WORKER_TFS}")
@@ -220,7 +315,7 @@ class Worker:
             now_ms = int(time.time() * 1000)
             run_at = scheduler.next_run_at_ms("5m", now_ms)
             await asyncio.sleep(max(0.0, (run_at - now_ms) / 1000))
-            for pair in PAIRS:
+            for pair in registry.ready_pairs():
                 try:
                     await loop.run_in_executor(
                         self.regen_pool, self._cycle_5m_sync, pair)
@@ -234,7 +329,7 @@ class Worker:
             run_at = scheduler.next_run_at_ms("1h", now_ms)
             boundary_ms = run_at - scheduler.CLOSE_BUFFER_MS
             await asyncio.sleep(max(0.0, (run_at - now_ms) / 1000))
-            for pair in PAIRS:
+            for pair in registry.ready_pairs():
                 try:
                     await loop.run_in_executor(
                         self.regen_pool, self._structural_cycle_sync, pair, boundary_ms)
@@ -244,7 +339,7 @@ class Worker:
     async def live_loop(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
-            for pair in PAIRS:
+            for pair in registry.ready_pairs():
                 try:
                     await loop.run_in_executor(self.live_pool, self._live_sync, pair)
                 except Exception as e:
@@ -253,17 +348,20 @@ class Worker:
 
     async def main(self) -> None:
         _load_dotenv()
-        log(f"[worker] starting: pairs={PAIRS} tfs={WORKER_TFS}"
+        registry.seed_if_missing()
+        ready = registry.ready_pairs()
+        log(f"[worker] starting: ready={ready} tfs={WORKER_TFS}"
             + (" [alerts DRY-RUN]" if ALERTS_DRY_RUN else ""))
         loop = asyncio.get_running_loop()
         live_task = asyncio.create_task(self.live_loop())
-        for pair in PAIRS:
+        for pair in ready:
             try:
                 await loop.run_in_executor(self.regen_pool, self._startup_sync, pair)
             except Exception as e:
                 self.report_error(f"{pair}:startup", e)
         tasks = [asyncio.create_task(self.five_min_loop()),
-                 asyncio.create_task(self.structural_loop())]
+                 asyncio.create_task(self.structural_loop()),
+                 asyncio.create_task(self.registry_loop())]
         try:
             await asyncio.gather(live_task, *tasks)
         finally:

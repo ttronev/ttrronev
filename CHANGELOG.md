@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — ttrronev-service Stage 8: live chart + dynamic pairs (2026-07-30)
+- Pair registry (`detectors/results/pairs.json`, seeded from service/pairs.py):
+  `POST /api/pairs` (input normalized, symbol validated on OKX; 422/409),
+  `DELETE /api/pairs/{pair}` (disk untouched). Worker watches the registry
+  and bootstraps new pairs one at a time (1w→1d→4h→2h→1h→5m, full 1h
+  history for bias parity, chain + state after the memory TFs) — adding a
+  pair is a UI action, no code edits, no restarts (supersedes base
+  criterion 4). Registry writes are lock-serialized (thread + cross-process
+  lockfile).
+- `GET /api/candles/{pair}/{tf}` (tail-reader, mtime cache, cap 1500) and
+  extended `/api/state` (status, tfs_ready, recent_events_7d).
+- Dashboard v2: TradingView Lightweight Charts 4.2.0 (pinned CDN, Apache-2.0
+  attribution in the footer) — candles per TF with instant cached switching,
+  level priceLines (kind/strength coded), active-range band lines (current +
+  next-higher TF), 7-day event markers, toggles in localStorage, add-pair UI
+  with N/6 bootstrap progress and queue display, heartbeat (green <5m /
+  yellow <15m / red + stale banner), live last-bar approximation every 15s.
+- `/api/health` now also carries worker-level liveness (registry-loop
+  heartbeat), so a dead worker is detectable before any pair is ready.
+
 ### Added — ttrronev-service (2026-07-28)
 - `service/` package: 24/7 analysis worker (`python -m service.worker`) +
   FastAPI web API/dashboard (`uvicorn service.api:app`). Fetches OKX candles
