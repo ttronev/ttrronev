@@ -33,6 +33,8 @@ let bootstrapTimer = null;
 let bootstrapGen = 0;                           // invalidates superseded poll chains
 let uiReady = false;                            // one-time DOM setup done
 let pendingAutoSwitch = null;                   // pair the USER just added
+let viewGen = 0;                                // invalidates stale view renders
+let candlesAbort = null;                        // aborts the previous view's fetch
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -123,11 +125,12 @@ function initPriceAxisZoom(host) {
 const mapCandles = (candles) => candles.map(([ts, o, h, l, c]) => ({
   time: ts / 1000, open: o, high: h, low: l, close: c }));
 
-async function loadCandles(pair, tf, { force = false } = {}) {
+async function loadCandles(pair, tf, { force = false, signal = null } = {}) {
   const key = `${pair}:${tf}`;
   const hit = candleCache[key];
   if (hit && !force) return hit.candles;       // instant TF switch from cache
-  const r = await fetch(`/api/candles/${pair}/${tf}?limit=500`, { cache: "no-store" });
+  const r = await fetch(`/api/candles/${pair}/${tf}?limit=500`,
+                        { cache: "no-store", signal });
   if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
   const j = await r.json();
   const mapped = mapCandles(j.candles);
@@ -149,39 +152,83 @@ async function loadCandles(pair, tf, { force = false } = {}) {
 // range, so the viewport doesn't jump. One in-flight request max.
 async function maybeLoadOlder(range) {
   if (!range || !currentPair || !series) return;
-  const key = `${currentPair}:${currentTF}`;
+  const gen = viewGen;                          // owning view of this load
+  const pair = currentPair, tf = currentTF;
+  const key = `${pair}:${tf}`;
   const c = candleCache[key];
   if (!c || !c.hasMore || c.loadingOlder || !c.candles.length) return;
   if (range.from >= 100) return;
   c.loadingOlder = true;
   try {
     const before = Math.round(c.candles[0].time * 1000);
-    const r = await fetch(
-      `/api/candles/${currentPair}/${currentTF}?limit=500&before=${before}`,
-      { cache: "no-store" });
+    const r = await fetch(`/api/candles/${pair}/${tf}?limit=500&before=${before}`,
+                          { cache: "no-store" });
     if (!r.ok) { c.hasMore = false; return; }
     const j = await r.json();
     const older = mapCandles(j.candles).filter(b => b.time < c.candles[0].time);
     c.hasMore = !!j.has_more && older.length > 0;
     if (older.length) {
-      c.candles = older.concat(c.candles);
-      series.setData(c.candles);
-      renderOverlays(c.candles);
+      c.candles = older.concat(c.candles);      // cache always safe (keyed)
+      if (gen === viewGen) {                    // ...but NEVER paint another
+        series.setData(c.candles);              //    view's candles (fast
+        renderOverlays(c.candles);              //    pair-switch race)
+      }
     }
   } catch { /* transient — retry on next range change */ }
   finally { c.loadingOlder = false; }
 }
 
-async function renderChart({ forceCandles = false } = {}) {
-  if (!currentPair || !series) return;         // chart may be absent (CDN down)
+/* Unified pair/TF switch (spec fix): reset manual axis zoom BEFORE setData,
+   abort the previous view's fetch, force price autoscale back on (manual
+   axis drag turns it off), and land on the last ~150 bars at current price
+   (NOT fitContent — that would zoom out to all loaded history every time).
+   Manual zoom/drag keeps working WITHIN a view; toggles are untouched. */
+async function switchView(pair, tf) {
+  const gen = ++viewGen;
+  currentPair = pair;
+  currentTF = tf;
+  localStorage.setItem("ttr_tf", tf);
+  if (!series) { await refreshState(); return; }
+  priceZoom = 1;                               // 1. BEFORE setData: provider must
+                                               //    not serve the old pair's range
+  const key = `${pair}:${tf}`;
+  if (candleCache[key]) candleCache[key].loadingOlder = false;   // 2. paging reset
+  if (candlesAbort) candlesAbort.abort();      // 3. kill the previous view's fetch
+  candlesAbort = new AbortController();
   let candles;
   try {
-    candles = await loadCandles(currentPair, currentTF, { force: forceCandles });
-  } catch {
+    candles = await loadCandles(pair, tf, { signal: candlesAbort.signal });
+  } catch (e) {
+    if (e.name === "AbortError" || gen !== viewGen) return;   // superseded
     series.setData([]);
     clearOverlays();
     return;
   }
+  if (gen !== viewGen) return;                 // a newer switch won
+  series.setData(candles);
+  applyLiveToLastBar();
+  renderOverlays(candles);
+  series.priceScale().applyOptions({ autoScale: true });      // 4. re-fit price
+  chart.timeScale().setVisibleLogicalRange({                  // 5. to current price
+    from: Math.max(0, candles.length - 150),
+    to: candles.length + 5,
+  });
+}
+
+async function renderChart({ forceCandles = false } = {}) {
+  // In-view refresh (60s candle poll, toggle changes) — no view reset.
+  if (!currentPair || !series) return;         // chart may be absent (CDN down)
+  const gen = viewGen;
+  let candles;
+  try {
+    candles = await loadCandles(currentPair, currentTF, { force: forceCandles });
+  } catch {
+    if (gen !== viewGen) return;
+    series.setData([]);
+    clearOverlays();
+    return;
+  }
+  if (gen !== viewGen) return;                 // pair/TF switched mid-fetch
   series.setData(candles);
   applyLiveToLastBar();
   renderOverlays(candles);
@@ -404,7 +451,7 @@ function scheduleBootstrapPoll() {
       currentPair = target;
       $("pair-select").value = target;
       delete candleCache[`${target}:${currentTF}`];
-      refreshState().then(() => renderChart({ forceCandles: true }));
+      Promise.all([refreshState(), switchView(target, currentTF)]);
     }
     return;
   }
@@ -432,8 +479,7 @@ function scheduleBootstrapPoll() {
           currentPair = autoTarget;
           $("pair-select").value = currentPair;
           delete candleCache[`${autoTarget}:${currentTF}`];
-          await refreshState();
-          await renderChart({ forceCandles: true });
+          await Promise.all([refreshState(), switchView(autoTarget, currentTF)]);
         }
         return;
       }
@@ -550,11 +596,9 @@ function initTFSwitch() {
   for (const tf of TFS) {
     const b = el("button", tf === currentTF ? "tf-btn active" : "tf-btn", tf.toUpperCase());
     b.addEventListener("click", async () => {
-      currentTF = tf;
-      localStorage.setItem("ttr_tf", tf);
       nav.querySelectorAll(".tf-btn").forEach(x => x.classList.remove("active"));
       b.classList.add("active");
-      await renderChart();                     // cached candles -> instant
+      await switchView(currentPair, tf);       // cached candles -> instant
     });
     nav.appendChild(b);
   }
@@ -611,11 +655,10 @@ function initOnce() {
   initToggles();
   initAddPair();
   $("pair-select").addEventListener("change", async (e) => {
-    currentPair = e.target.value;
     pendingAutoSwitch = null;                  // user navigated: no auto-yank
     lastState = null;
-    await refreshState();
-    await renderChart();
+    currentPair = e.target.value;              // BEFORE refreshState captures it
+    await Promise.all([refreshState(), switchView(currentPair, currentTF)]);
   });
 }
 
@@ -632,7 +675,7 @@ async function init() {
   currentPair = (ready[0] || registryEntries[0] || {}).pair || null;
   if (currentPair) $("pair-select").value = currentPair;
   await refreshState();
-  await renderChart();
+  if (currentPair) await switchView(currentPair, currentTF);
   await refreshHealth();
   setInterval(refreshState, POLL_STATE_MS);
   setInterval(refreshHealth, POLL_HEALTH_MS);
