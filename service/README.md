@@ -54,12 +54,14 @@ One-time setup:
    `TTRRONEV_TG_BOT_TOKEN` / `TTRRONEV_TG_CHAT_ID`.
    **Reissue the bot token first** (@BotFather → /revoke) — the old one
    sat in a repo archive.
-3. Seed `data/raw/` with the pair CSVs — **copy them from the research
-   machine** (`scp -r data/raw/ vps:/opt/ttrronev/data/`). Note: a fresh
-   clone has no `data/raw/` (gitignored), and `okx_fetch.py` only *extends*
-   existing CSVs — it cannot bootstrap a missing one. To bootstrap from
-   scratch instead, call `fetch_okx_candles(inst_id, bar, start_ms=...)`
-   programmatically per TF (see `data/bootstrap_5m.py` for the pattern).
+3. Data. **A fresh clone needs NO manual data seeding** (since Stage 8):
+   seed pairs whose CSVs are absent are registered as `bootstrapping` and
+   the worker fetches their full history from OKX on first start (~5 min
+   per pair); further coins are added from the dashboard UI. Optionally
+   copy `data/raw/` from another machine first
+   (`scp -r data/raw/ vps:/opt/ttrronev/data/`) — that preserves
+   pre-OKX-listing history (e.g. BTC's 2017-2019 Binance-era candles,
+   which OKX cannot provide) and skips the initial fetch.
 4. Caddy: install `deploy/Caddyfile.example` (hash via `caddy hash-password`).
 5. ufw: allow 22/80/443 only. Port 8000 is already loopback-bound in compose.
 

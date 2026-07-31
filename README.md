@@ -1,8 +1,27 @@
 # ttrronev
 
-An autonomous crypto trading bot that trades USDT-margined perpetual futures on Bybit
-using ML-driven signals, with a backtesting engine and a planned bridge to the
-OpenClaw AI agent platform.
+Crypto market-structure research stack: a validated multi-timeframe range
+detector (L1 ranges → range memory → level strength) plus **ttrronev-service**
+— a 24/7 analysis worker and web dashboard (live chart, S/R levels, dynamic
+multi-coin registry). No live trading.
+
+## Quickstart (fresh machine)
+
+```bash
+git clone https://github.com/ttronev/ttrronev
+cd ttrronev
+docker compose up -d          # seed pair bootstraps its own history (~5 min)
+```
+
+Dashboard: http://localhost:8000 — add more coins from the UI («+ добавить»).
+Optional: put Telegram creds in `.env` (`TTRRONEV_TG_BOT_TOKEN`,
+`TTRRONEV_TG_CHAT_ID`) for structural alerts; copy `data/raw/` from another
+machine to keep pre-OKX history. Full runbook: [service/README.md](service/README.md).
+
+---
+
+The sections below describe the original trading-bot charter (research
+phase; the trading side is scaffolding only).
 
 ## Trading Universe
 

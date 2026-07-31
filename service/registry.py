@@ -120,14 +120,24 @@ def _now_iso() -> str:
 
 
 def seed_if_missing() -> None:
+    """First-start seed from service/pairs.py. A seed pair whose raw CSVs
+    are absent (fresh git clone on a new machine — data/raw is gitignored)
+    is seeded as BOOTSTRAPPING so the worker fetches its history itself:
+    clone -> docker compose up -d is all a new box needs."""
     if REGISTRY_PATH.exists():
         return
     with _locked():
         if REGISTRY_PATH.exists():             # another process seeded first
             return
-        entries = [{"pair": p, "status": READY, "added_ts": _now_iso(),
-                    "tfs_ready": ["1w", "1d", "4h", "2h", "1h", "5m"]}
-                   for p in SEED_PAIRS]
+        entries = []
+        for p in SEED_PAIRS:
+            has_data = paths.raw_csv("1h", p).exists()
+            entries.append(
+                {"pair": p, "status": READY, "added_ts": _now_iso(),
+                 "tfs_ready": ["1w", "1d", "4h", "2h", "1h", "5m"]}
+                if has_data else
+                {"pair": p, "status": BOOTSTRAPPING, "added_ts": _now_iso(),
+                 "tfs_ready": []})
         atomic_write_json(REGISTRY_PATH, entries)
 
 
