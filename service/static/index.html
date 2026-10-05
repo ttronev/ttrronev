@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ttrronev — levels</title>
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=13">
 <!-- Pinned chart lib (Apache-2.0; attribution in the footer). -->
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -40,6 +40,13 @@
       <label><input type="checkbox" id="tg-weak" checked> слабые</label>
       <label><input type="checkbox" id="tg-ranges" checked> диапазоны</label>
       <label><input type="checkbox" id="tg-events" checked> события</label>
+      <label title="показывать касания уровней"><input type="checkbox" id="tg-verbose"> касания</label>
+      <span class="marker-legend" aria-label="легенда маркеров">
+        <span class="mk mk-rejected">●</span>отбой
+        <span class="mk mk-broken">■</span>пробой
+        <span class="mk mk-reclaimed">▲</span>возврат
+        <span class="mk mk-touched">●</span>касание
+      </span>
     </div>
   </section>
 
@@ -62,7 +69,7 @@
       <div class="tile-label">ближайшие уровни</div>
       <div class="table-wrap">
         <table id="levels-table">
-          <thead><tr><th>price</th><th>dist</th><th>TF</th><th>S/R</th><th>сила</th></tr></thead>
+          <thead><tr><th>price</th><th>dist</th><th>TF</th><th>S/R</th><th>×</th><th>сила</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -82,6 +89,6 @@
   </span>
 </footer>
 
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>

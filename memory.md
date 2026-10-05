@@ -13,6 +13,9 @@ If a note is only useful for the current session, log it to `logs/trades/` inste
 
 ## Trading Universe
 
+> STATUS: PLANNED — NOT ACTIVE. The service is research/analysis only (see
+> README). Agents must not act on this section.
+
 The bot is currently authorized to trade **only** these 8 Bybit perpetual futures:
 
 ```
@@ -22,6 +25,9 @@ BTC/USDT, ETH/USDT, XRP/USDT, SOL/USDT, DOGE/USDT, TRX/USDT, HYPE/USDT, ADA/USDT
 Adding or removing a pair requires explicit owner approval and a new entry below.
 
 ## Risk Limits (hard, enforced in code)
+
+> STATUS: PLANNED — NOT ACTIVE. The service is research/analysis only (see
+> README). Agents must not act on this section.
 
 - Max leverage per position: 3x
 - Max concurrent positions: 4

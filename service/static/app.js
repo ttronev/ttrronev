@@ -27,7 +27,7 @@ let registryEntries = [];
 let lastState = null;
 let candleCache = {};                          // "pair:tf" -> {candles, fetchedAt}
 let chart, series;
-let priceLines = [];                            // [{line, level}]
+let zoneLines = [];                             // [{zone, lines:[priceLine,...]}] (Stage 9a)
 let rangeLines = [];
 let bootstrapTimer = null;
 let bootstrapGen = 0;                           // invalidates superseded poll chains
@@ -45,7 +45,7 @@ const el = (tag, cls, text) => {
 };
 
 const toggles = Object.assign(
-  { strong: true, weak: true, ranges: true, events: true },
+  { strong: true, weak: true, ranges: true, events: true, verboseEvents: false },
   JSON.parse(localStorage.getItem("ttr_toggles") || "{}"));
 
 function fmtPrice(x) {
@@ -236,12 +236,13 @@ async function renderChart({ forceCandles = false } = {}) {
 
 function clearOverlays() {
   if (!series) return;
-  for (const { line } of priceLines) series.removePriceLine(line);
+  for (const zl of zoneLines) for (const line of zl.lines) series.removePriceLine(line);
   for (const line of rangeLines) series.removePriceLine(line);
-  priceLines = [];
+  zoneLines = [];
   rangeLines = [];
   series.setMarkers([]);
   window.__levelsRendered = [];
+  window.__zonesRendered = [];
 }
 
 // Snap a timestamp to the bar grid of the loaded candles (greatest candle
@@ -263,24 +264,41 @@ function renderOverlays(candles) {
   if (!lastState || lastState.pair !== currentPair) return;
   const rank = TF_RANK[currentTF];
 
-  // Levels -> priceLines. Higher-TF levels always visible; lower-TF hidden.
-  for (const L of lastState.levels || []) {
-    if (TF_RANK[L.tf] < rank) continue;
-    if (L.strength === "strong" && !toggles.strong) continue;
-    if (L.strength === "weak" && !toggles.weak) continue;
-    const isS = L.kind === "support";
-    const line = series.createPriceLine({
-      price: L.price,
-      color: isS ? C.support : C.resist,
-      lineWidth: L.strength === "strong" ? 2 : 1,
-      lineStyle: L.strength === "strong"
-        ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
-      axisLabelVisible: true,
-      title: `${L.tf.toUpperCase()} · ${isS ? "S" : "R"}`,
-    });
-    priceLines.push({ line, level: L });
+  // Zones -> priceLines (Stage 9a). A multi-price zone draws as a band: thin
+  // dashed edges at lo/hi + a labeled center line. A single-member zone draws
+  // as one line, exactly like a level did. TF-visibility keys on top_tf.
+  for (const z of lastState.zones || []) {
+    if (TF_RANK[z.top_tf] < rank) continue;
+    if (z.strength === "strong" && !toggles.strong) continue;
+    if (z.strength === "weak" && !toggles.weak) continue;
+    const isS = z.kind === "support";
+    const color = isS ? C.support : C.resist;
+    const strong = z.strength === "strong";
+    let title = `${z.top_tf.toUpperCase()} · ${isS ? "S" : "R"}`;
+    if (z.confluence > 1) title += ` ×${z.confluence}`;
+    const lines = [];
+    if (z.price_hi > z.price_lo) {                 // band edges (thin, dashed, unlabeled)
+      for (const edge of [z.price_lo, z.price_hi]) {
+        lines.push(series.createPriceLine({
+          price: edge, color, lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: false, title: "",
+        }));
+      }
+    }
+    lines.push(series.createPriceLine({           // labeled center — pushed LAST
+      price: z.price, color,
+      lineWidth: strong ? 2 : 1,
+      lineStyle: strong ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true, title,
+    }));
+    zoneLines.push({ zone: z, lines });
   }
-  window.__levelsRendered = priceLines.map(p => p.level.price);   // acceptance hook
+  // Acceptance hooks: zones, plus a levels mirror (zone centers) so any older
+  // acceptance script still finds an array.
+  window.__zonesRendered = zoneLines.map(zl =>
+    ({ price: zl.zone.price, lo: zl.zone.price_lo, hi: zl.zone.price_hi, n: zl.zone.confluence }));
+  window.__levelsRendered = zoneLines.map(zl => zl.zone.price);
 
   // Active range bands: current TF + next higher.
   if (toggles.ranges) {
@@ -313,12 +331,12 @@ function renderOverlays(candles) {
     for (const e of lastState.recent_events_7d || []) {
       if (TF_RANK[e.tf] < rank) continue;
       const t = String(e.type).replace("historical_level_", "");
+      if (t === "touched" && !toggles.verboseEvents) continue;   // 9a.3: touches off by default
       const m = MARK[t];
       if (!m) continue;
       const barT = snapToCandle(candles, new Date(e.ts).getTime() / 1000);
       if (barT === null || barT < first || barT > last) continue;
-      markers.push({ time: barT, position: m.position, shape: m.shape,
-                     color: m.color, text: `${t} ${fmtPrice(e.level_price)}` });
+      markers.push({ time: barT, position: m.position, shape: m.shape, color: m.color });  // 9a.3: no text
     }
     markers.sort((a, b) => a.time - b.time);
     series.setMarkers(markers);
@@ -349,14 +367,17 @@ function applyLiveToLastBar() {
 }
 
 function flashLevel(price) {
-  const hit = priceLines.find(p => p.level.price === price);
+  // Flash the whole zone (every line of the band): highlight, then restore
+  // edges to width 1 and the center (last line) to its strength width.
+  const hit = zoneLines.find(zl => zl.zone.price === price);
   if (!hit) return;
-  const orig = {
-    color: hit.level.kind === "support" ? C.support : C.resist,
-    lineWidth: hit.level.strength === "strong" ? 2 : 1,
-  };
-  hit.line.applyOptions({ color: C.near, lineWidth: 3 });
-  setTimeout(() => hit.line.applyOptions(orig), 900);
+  for (const line of hit.lines) line.applyOptions({ color: C.near, lineWidth: 3 });
+  setTimeout(() => {
+    const color = hit.zone.kind === "support" ? C.support : C.resist;
+    const centerW = hit.zone.strength === "strong" ? 2 : 1;
+    hit.lines.forEach((line, i) =>
+      line.applyOptions({ color, lineWidth: i === hit.lines.length - 1 ? centerW : 1 }));
+  }, 900);
 }
 
 /* ------------------------------------------------------------- state card */
@@ -387,21 +408,25 @@ function renderLevelsTable(st) {
   const live = st.live || {};
   const livePx = (live.ok && live.price) || st.price_last_close_1h;
   if (!livePx) return;
-  const levels = (st.levels || []).slice()
+  const zones = (st.zones || []).slice()
     .sort((a, b) => Math.abs(a.price - livePx) - Math.abs(b.price - livePx));
-  for (const L of levels.slice(0, 14)) {
-    const dist = ((L.price - livePx) / livePx) * 100;
+  for (const z of zones.slice(0, 14)) {
+    const dist = ((z.price - livePx) / livePx) * 100;
     const tr = el("tr", Math.abs(dist) <= NEAR_PCT ? "near" : "");
-    tr.appendChild(el("td", "", fmtPrice(L.price)));
+    const priceTxt = fmtPrice(z.price_lo) === fmtPrice(z.price_hi)
+      ? fmtPrice(z.price)                                   // single price
+      : `${fmtPrice(z.price_lo)}–${fmtPrice(z.price_hi)}`;  // band
+    tr.appendChild(el("td", "", priceTxt));
     tr.appendChild(el("td", "dist-pos", `${dist >= 0 ? "+" : ""}${dist.toFixed(2)}%`));
-    tr.appendChild(el("td", "", L.tf.toUpperCase()));
-    tr.appendChild(el("td", L.kind === "support" ? "kind-s" : "kind-r",
-      L.kind === "support" ? "S" : "R"));
-    tr.appendChild(el("td", L.strength === "strong" ? "str-strong" : "str-weak", L.strength));
-    tr.addEventListener("click", () => flashLevel(L.price));
+    tr.appendChild(el("td", "", (z.tfs || []).map(t => t.toUpperCase()).join("+")));
+    tr.appendChild(el("td", z.kind === "support" ? "kind-s" : "kind-r",
+      z.kind === "support" ? "S" : "R"));
+    tr.appendChild(el("td", "conf", z.confluence > 1 ? `×${z.confluence}` : ""));
+    tr.appendChild(el("td", z.strength === "strong" ? "str-strong" : "str-weak", z.strength));
+    tr.addEventListener("click", () => flashLevel(z.price));
     tbody.appendChild(tr);
   }
-  if (levels.length && Math.abs(((levels[0].price - livePx) / livePx) * 100) <= NEAR_PCT)
+  if (zones.length && Math.abs(((zones[0].price - livePx) / livePx) * 100) <= NEAR_PCT)
     tbody.firstChild.classList.add("nearest");
 }
 
@@ -605,7 +630,8 @@ function initTFSwitch() {
 }
 
 function initToggles() {
-  const map = { "tg-strong": "strong", "tg-weak": "weak", "tg-ranges": "ranges", "tg-events": "events" };
+  const map = { "tg-strong": "strong", "tg-weak": "weak", "tg-ranges": "ranges",
+                "tg-events": "events", "tg-verbose": "verboseEvents" };
   for (const [id, key] of Object.entries(map)) {
     const cb = $(id);
     cb.checked = toggles[key];

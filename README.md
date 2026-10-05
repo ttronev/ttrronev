@@ -14,9 +14,11 @@ docker compose up -d          # seed pair bootstraps its own history (~5 min)
 ```
 
 Dashboard: http://localhost:8000 — add more coins from the UI («+ добавить»).
-Optional: put Telegram creds in `.env` (`TTRRONEV_TG_BOT_TOKEN`,
-`TTRRONEV_TG_CHAT_ID`) for structural alerts; copy `data/raw/` from another
-machine to keep pre-OKX history. Full runbook: [service/README.md](service/README.md).
+Optional: copy `.env.example` → `.env` and add your Telegram creds
+(`TTRRONEV_TG_BOT_TOKEN`, `TTRRONEV_TG_CHAT_ID`) for structural alerts; copy
+`data/raw/` from another machine to keep pre-OKX history. If port 8000 is taken
+on your machine, set `TTRRONEV_PORT` in `.env`. Full runbook:
+[service/README.md](service/README.md).
 
 ---
 

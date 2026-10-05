@@ -44,6 +44,9 @@ venv/
 # Claude Code local settings (machine-specific)
 /.claude/
 
+# Source pack (scripts/pack_source.ps1 output — a build artifact, not source)
+/ttrronev_src.zip
+
 # --- OS / editor ---------------------------------------------------------------
 .DS_Store
 Thumbs.db

@@ -6,6 +6,37 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — ttrronev-service Stage 9a: display zones + event de-noising (2026-08-28)
+- **Display zones** (`service/state_builder.py`): new ADDITIVE `zones` field in
+  `state.json` — the same strong+weak levels merged into ATR-normalized bands.
+  Tolerance = `clamp(0.30 × ATR14(1h)/last_1h_close, 0.2%, 0.8%)` via the (until
+  now unused) `shared/atr.py` Wilder ATR; greedy ascending cluster; each zone
+  carries a strength-weighted center, member TFs, confluence, top_tf and a small
+  member list. Selection budget: ≤6 per side by (top_tf rank, score) plus always
+  the single nearest per side. On SOL (ref $96.98) this collapses 36 level-lines
+  → 18 merged zones → 9 published (largest cluster 6). **`levels` is byte-
+  unchanged** — the chart/table read `zones`; every other consumer still reads
+  `levels`.
+- **Frontend** (`service/static/app.js` + `index.html` + `style.css`): the chart
+  draws zones as bands (thin dashed edges + a labeled center, e.g. `4H · S ×3`);
+  a single-member zone draws as one line as before. Levels table rows become
+  zones (price-or-`lo–hi`, TFs joined `4H+2H`, `×confluence`); a row click
+  flashes the whole band. `window.__zonesRendered` + `__levelsRendered`
+  acceptance hooks. Static asset version bumped to v13.
+- **Event de-noising**: markers lose their text labels (meaning moves to a static
+  legend); `historical_level_touched` is hidden unless the new `касания`
+  toggle (`verboseEvents`, default off) is on. rejected/broken/reclaimed still
+  draw by default. 7-day window + TF-visibility rule unchanged.
+- H1: `.env.example` at repo root (placeholder keys) + README pointer — the real
+  `.env` is untouched. H2: `memory.md` Trading-Universe / Risk-Limits sections
+  now carry a `PLANNED — NOT ACTIVE` banner (resolves the README-«no live
+  trading» vs memory.md-«authorized to trade» contradiction). H5:
+  `scripts/pack_source.ps1` builds a credential-free, runtime-free
+  `ttrronev_src.zip` (127 files / 0.3 MB).
+- Tests: `service/test_zones.py` (8 checks — cross-TF merges, tol clamping,
+  budget-keeps-nearest, pack-is-one-band, no-adjacent-within-tol). **No detection
+  or memory recompute this stage** (display-only); L5/L5.1 artifacts unchanged.
+
 ### Added — ttrronev-service Stage 8: live chart + dynamic pairs (2026-07-30)
 - Pair registry (`detectors/results/pairs.json`, seeded from service/pairs.py):
   `POST /api/pairs` (input normalized, symbol validated on OKX; 422/409),

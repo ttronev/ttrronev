@@ -37,10 +37,21 @@ import pandas as pd
 from detectors import paths
 from service.ioutil import atomic_write_json
 from service.pairs import WORKER_TFS, MEMORY_TFS, TF_MS
+from shared.atr import compute_atr
 
 TREND_TFS = ["1d", "4h"]
 LEVELS_PCT = 0.15               # include levels within +/-15% of reference
 EVENT_TYPES = ("historical_level_touched", "rejected", "broken", "reclaimed")
+
+# --- Stage 9a: display zones (ATR-normalized merge over the SAME levels) ------
+# Cross-TF precedence; mirrors the frontend TF_RANK in app.js (Stage 9-H3 will
+# unify these via GET /api/config so the two can't silently drift).
+TF_RANK = {"5m": 0, "1h": 1, "2h": 2, "4h": 3, "1d": 4, "1w": 5}
+ZONE_TOL_MULT = 0.30            # tol_pct = 0.30 * atr_pct(1h), then clamped
+ZONE_TOL_MIN, ZONE_TOL_MAX = 0.002, 0.008
+ZONE_TOL_FALLBACK = 0.0035     # 1h history < 20 bars, or ATR NaN
+ZONE_WEIGHT_FLOOR = 0.1        # strength_score floor for the weighted center
+ZONE_PER_SIDE = 6              # selection budget per above/below side
 
 
 def _ema_1h_state(state, tf: str) -> str | None:
@@ -141,7 +152,119 @@ def _events(state, hours=24):
     } for e in state.recent_events(hours=hours, types=EVENT_TYPES)]
 
 
-def build_state(pair: str, state=None, live_price: float | None = None) -> dict:
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def _zone_tol_pct(pair: str, log=None) -> float:
+    """Merge tolerance = clamp(0.30 * ATR14(1h)/last_1h_close, 0.2%, 0.8%).
+    Wilder ATR via shared.atr on the 1h CSV tail(200) — an OWN high/low/close
+    read, separate from the close-only _ema_1h_state read. Falls back to 0.35%
+    (+ warn) when the 1h CSV has < 20 bars or ATR is NaN."""
+    try:
+        df = pd.read_csv(paths.raw_csv("1h", pair),
+                         usecols=["high", "low", "close"]).tail(200)
+        if len(df) < 20:
+            raise ValueError(f"only {len(df)} 1h bars")
+        atr_last = float(compute_atr(df, 14)[-1])
+        close = float(df["close"].iloc[-1])
+        atr_pct = atr_last / close if close else float("nan")
+        if atr_pct != atr_pct:                          # NaN
+            raise ValueError("ATR is NaN")
+        return _clamp(ZONE_TOL_MULT * atr_pct, ZONE_TOL_MIN, ZONE_TOL_MAX)
+    except Exception as e:
+        (log or print)(f"[zones] {pair}: ATR tol fallback {ZONE_TOL_FALLBACK}: {e}")
+        return ZONE_TOL_FALLBACK
+
+
+def _collect_zone_levels(state):
+    """Per-TF strong+weak levels with the fields the zone builder needs — a
+    superset of what _levels() publishes (adds strength_score), collected
+    separately so the byte-compatible `levels` field stays untouched."""
+    out = []
+    for tf in MEMORY_TFS:
+        for L in state.near_levels(tf, LEVELS_PCT):
+            out.append({
+                "tf": tf, "price": L["price"], "score": L["score"],
+                "class": L["class"], "source": L["source"],
+                "last_event": L["last_event"],
+                "last_event_ts": L["last_event_ts"] or None,
+            })
+    return out
+
+
+def _emit_zone(members, ref_price: float) -> dict:
+    prices = [m["price"] for m in members]
+    wsum = sum(max(m["score"], ZONE_WEIGHT_FLOOR) for m in members)
+    center = sum(m["price"] * max(m["score"], ZONE_WEIGHT_FLOOR)
+                 for m in members) / wsum
+    tfs = sorted({m["tf"] for m in members}, key=lambda t: -TF_RANK[t])
+    evented = [m for m in members if m["last_event_ts"]]
+    last = max(evented, key=lambda m: m["last_event_ts"]) if evented else None
+    return {
+        "price": round(center, 6),
+        "price_lo": min(prices),
+        "price_hi": max(prices),
+        "kind": "support" if center <= ref_price else "resistance",
+        "tfs": tfs,
+        "top_tf": tfs[0],
+        "strength": "strong" if any(m["class"] == "strong" for m in members) else "weak",
+        "score": round(max(m["score"] for m in members), 4),
+        "confluence": len(members),
+        "dist_pct_from_live": round((center - ref_price) / ref_price * 100, 3),
+        "last_event": last["last_event"] if last else None,
+        "last_event_ts": last["last_event_ts"] if last else None,
+        "members": [{"tf": m["tf"], "price": m["price"], "score": m["score"],
+                     "class": m["class"], "source_range_id": m["source"]}
+                    for m in members],
+    }
+
+
+def _build_zones(levels, ref_price: float, tol_pct: float):
+    """Greedy ascending merge: a level joins the current cluster iff its price is
+    within tol_pct of the cluster's running MAX price; else it opens a new one.
+    Deterministic (stable price sort)."""
+    if not levels:
+        return []
+    ordered = sorted(levels, key=lambda x: x["price"])
+    clusters, cur, cmax = [], [ordered[0]], ordered[0]["price"]
+    for L in ordered[1:]:
+        if cmax > 0 and (L["price"] - cmax) / cmax <= tol_pct:
+            cur.append(L)
+            cmax = L["price"]                           # ascending sort => new max
+        else:
+            clusters.append(cur)
+            cur, cmax = [L], L["price"]
+    clusters.append(cur)
+    return [_emit_zone(c, ref_price) for c in clusters]
+
+
+def _budget_zones(zones, ref_price: float, per_side: int = ZONE_PER_SIDE):
+    """Keep up to `per_side` zones each side of ref, ranked by
+    (TF_RANK[top_tf] desc, score desc); ALWAYS additionally include the single
+    nearest zone per side even if it lost the ranking. Publish sorted by |dist|.
+    The full pre-budget set is not published."""
+    kept = []
+    for side in ([z for z in zones if z["price"] > ref_price],
+                 [z for z in zones if z["price"] <= ref_price]):
+        if not side:
+            continue
+        keep = sorted(side, key=lambda z: (-TF_RANK[z["top_tf"]], -z["score"]))[:per_side]
+        nearest = min(side, key=lambda z: abs(z["price"] - ref_price))
+        if not any(z is nearest for z in keep):
+            keep.append(nearest)
+        kept.extend(keep)
+    kept.sort(key=lambda z: abs(z["dist_pct_from_live"]))
+    return kept
+
+
+def _zones(state, ref_price: float, pair: str, log=None):
+    tol = _zone_tol_pct(pair, log=log)
+    zones = _build_zones(_collect_zone_levels(state), ref_price, tol)
+    return _budget_zones(zones, ref_price)
+
+
+def build_state(pair: str, state=None, live_price: float | None = None, log=None) -> dict:
     """Build the state dict. `state` may be a pre-built query_state.State
     (the worker passes its own); `live_price` overrides the level-distance
     reference (the worker passes the price from its live.json)."""
@@ -162,6 +285,10 @@ def build_state(pair: str, state=None, live_price: float | None = None) -> dict:
         "active_ranges": {tf: (_active_range(state, tf) if tf in state._l1 else None)
                           for tf in WORKER_TFS},
         "levels": _levels(state, ref),
+        # Stage 9a: ATR-normalized display zones over the same strong+weak
+        # levels. ADDITIVE — `levels` above is unchanged; the chart/table read
+        # `zones`, everything else still reads `levels`.
+        "zones": _zones(state, ref, pair, log=log),
         "recent_events_24h": _events(state, hours=24),
         # 7-day window feeds the chart's event markers (same event stream,
         # wider slice — no new analytics).
@@ -169,8 +296,8 @@ def build_state(pair: str, state=None, live_price: float | None = None) -> dict:
     }
 
 
-def write_state(pair: str, state=None, live_price: float | None = None) -> dict:
-    doc = build_state(pair, state=state, live_price=live_price)
+def write_state(pair: str, state=None, live_price: float | None = None, log=None) -> dict:
+    doc = build_state(pair, state=state, live_price=live_price, log=log)
     atomic_write_json(paths.state_json(pair), doc)
     return doc
 

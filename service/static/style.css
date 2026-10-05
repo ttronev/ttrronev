@@ -103,6 +103,18 @@ select, input, textarea {
 .chart-toolbar label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .chart-toolbar input[type="checkbox"] { accent-color: var(--accent); }
 
+/* Static marker legend (Stage 9a): colored icon + word, never color-alone. */
+.marker-legend {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px;
+  margin-left: auto; color: var(--text-muted); font-size: 11px;
+}
+.marker-legend .mk { line-height: 1; margin-left: 10px; }
+.marker-legend .mk:first-child { margin-left: 0; }
+.mk-rejected  { color: var(--support); }
+.mk-broken    { color: var(--resist); }
+.mk-reclaimed { color: var(--accent); }
+.mk-touched   { color: var(--text-muted); }
+
 /* ------------------------------------------------------------------ side */
 .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
@@ -149,6 +161,7 @@ tr.nearest td { font-weight: 700; }
 .str-strong { font-weight: 700; }
 .str-weak   { color: var(--text-secondary); }
 .dist-pos { color: var(--text-secondary); }
+td.conf { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 
 /* -------------------------------------------------------------- bootstrap */
 .bootstrap-bar {
