@@ -38,6 +38,7 @@ from detectors import paths
 from service.ioutil import atomic_write_json
 from service.pairs import WORKER_TFS, MEMORY_TFS, TF_MS
 from shared.atr import compute_atr
+from shared.pricefmt import round_price
 
 TREND_TFS = ["1d", "4h"]
 LEVELS_PCT = 0.15               # include levels within +/-15% of reference
@@ -202,7 +203,7 @@ def _emit_zone(members, ref_price: float) -> dict:
     evented = [m for m in members if m["last_event_ts"]]
     last = max(evented, key=lambda m: m["last_event_ts"]) if evented else None
     return {
-        "price": round(center, 6),
+        "price": round_price(center),
         "price_lo": min(prices),
         "price_hi": max(prices),
         "kind": "support" if center <= ref_price else "resistance",

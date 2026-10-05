@@ -66,6 +66,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Published prices are rounded with round_price, NOT round(x, 6): identical
+# for every price >= $0.01, but keeps >= 5 significant digits below that
+# (6 decimals left SHIB, ~0.000005, with one digit). Output-only — detection
+# itself runs on unrounded floats.
+from shared.pricefmt import round_price as _rp
+
 # The analyzer (wick-based original vs close-based sibling) is chosen
 # per-TF inside detect_ranges via cfg.use_close_based_extremes. High TFs
 # (1W/1D) use close-based so liquidation wicks don't set locked extremes;
@@ -83,9 +89,11 @@ class CoreRangeConfig:
     wick_multiplier:    float = 2.0
     wick_lookback_bars: int   = 20
     accepted_lookahead: int   = 6
-    # Retracement trigger / arming
+    # Retracement trigger / arming: the pending band arms once price has
+    # retraced AT LEAST this fraction of the impulse leg. (A `retrace_high`
+    # field used to sit here; no code ever read it — arming has no upper
+    # bound — so it was removed rather than left as a knob that does nothing.)
     retrace_low:  float = 0.725
-    retrace_high: float = 0.750
     # Band computation
     band_zone_pct: float = 0.25
     # Range end (confirmed phase) — bars of the detection TF
@@ -191,8 +199,10 @@ def _json_clean(o):
 
 
 def save_json(output, path):
-    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(_json_clean(output), indent=2), encoding="utf-8")
+    # Atomic (temp + os.replace): a process killed mid-write must leave the
+    # previous complete artifact, not a truncated JSON that breaks the chain.
+    from shared.ioutil import atomic_write_text
+    atomic_write_text(Path(path), json.dumps(_json_clean(output), indent=2))
 
 
 # --------------------------------------------------------------------- record
@@ -414,17 +424,17 @@ def detect_ranges(df, df_bias, cfg: CoreRangeConfig):
         leg_end_idx = pend["leg_end_idx"]
         raw, acc, overr, off, fb = wick_override(leg_end_idx, direction)
         pre = pend["predefined_band"]
-        pre_dict = ({"range_high_lower": round(pre[0], 6), "range_high_upper": round(pre[1], 6)}
+        pre_dict = ({"range_high_lower": _rp(pre[0]), "range_high_upper": _rp(pre[1])}
                     if direction == "up" else
-                    {"range_low_lower": round(pre[0], 6), "range_low_upper": round(pre[1], 6)})
+                    {"range_low_lower": _rp(pre[0]), "range_low_upper": _rp(pre[1])})
 
         common = dict(
             timeframe=cfg.timeframe, impulse_direction=direction,
             leg_start_ts=ts_col.iloc[(b_idx - 1) if b_idx >= 1 else b_idx].isoformat(),
-            leg_start_price=round(leg_start, 6),
+            leg_start_price=_rp(leg_start),
             leg_end_ts=ts_col.iloc[leg_end_idx].isoformat(),
-            leg_end_price_raw=round(raw, 6),
-            leg_end_price_accepted=(round(acc, 6) if acc is not None else None),
+            leg_end_price_raw=_rp(raw),
+            leg_end_price_accepted=(_rp(acc) if acc is not None else None),
             wick_overridden=overr,
             accepted_offset_pct=(round(off, 6) if off is not None else None),
             fallback_used=fb,
@@ -462,9 +472,9 @@ def detect_ranges(df, df_bias, cfg: CoreRangeConfig):
                                high=high, ts_col=ts_col, n=n, cfg=cfg)
         rll, rlu, rhl, rhu = final_band
         rmid = ((rll + rlu) / 2 + (rhl + rhu) / 2) / 2
-        conf_dict = ({"range_low_lower": round(rll, 6), "range_low_upper": round(rlu, 6)}
+        conf_dict = ({"range_low_lower": _rp(rll), "range_low_upper": _rp(rlu)}
                      if direction == "up" else
-                     {"range_high_lower": round(rhl, 6), "range_high_upper": round(rhu, 6)})
+                     {"range_high_lower": _rp(rhl), "range_high_upper": _rp(rhu)})
 
         def meta(at_idx, end_for_active):
             wc = [float(close[k]) for k in range(leg_end_idx, end_for_active + 1)]
@@ -485,15 +495,15 @@ def detect_ranges(df, df_bias, cfg: CoreRangeConfig):
             range_id=f"R{len(ranges):03d}_{cfg.timeframe}_{direction}_{ts_col.iloc[confirm_idx].strftime('%Y%m%d')}",
             range_phase_2_ts=ts_col.iloc[confirm_idx].isoformat(),
             is_confirmed=True, phase_1_outcome="confirmed", phase_2_band=conf_dict,
-            range_low_lower=round(rll, 6), range_low_upper=round(rlu, 6),
-            range_high_lower=round(rhl, 6), range_high_upper=round(rhu, 6),
-            range_mid=round(rmid, 6),
+            range_low_lower=_rp(rll), range_low_upper=_rp(rlu),
+            range_high_lower=_rp(rhl), range_high_upper=_rp(rhu),
+            range_mid=_rp(rmid),
             band_history=[{"ts": ts_col.iloc[bi].isoformat(),
-                           "rl_l": round(bd[0], 6), "rl_u": round(bd[1], 6),
-                           "rh_l": round(bd[2], 6), "rh_u": round(bd[3], 6)}
+                           "rl_l": _rp(bd[0]), "rl_u": _rp(bd[1]),
+                           "rh_l": _rp(bd[2]), "rh_u": _rp(bd[3])}
                           for (bi, bd) in history],
             failed_break_events=[{"ts": ts_col.iloc[fi].isoformat(), "direction": fd,
-                                   "close": round(fc, 6), "recovered_within_bars": int(rb)}
+                                   "close": _rp(fc), "recovered_within_bars": int(rb)}
                                   for (fi, fd, fc, rb) in failed],
             bos_inside_range=inside,
             metadata_at_creation=meta(confirm_idx, confirm_idx),

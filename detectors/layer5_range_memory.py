@@ -74,6 +74,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.pricefmt import round_price as _rp   # scale-safe (see shared/pricefmt.py)
+from shared.ioutil import atomic_write_json      # never leave a truncated artifact
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 
@@ -164,10 +166,10 @@ def _scan_level(price, end_idx, *, high, low, close, ts_iso, n):
             "ts": ts_iso[j],
             "type": ev,
             "role": role,
-            "level_price": round(price, 6),
-            "bar_close": round(c, 6),
-            "bar_high": round(hi, 6),
-            "bar_low": round(lo, 6),
+            "level_price": _rp(price),
+            "bar_close": _rp(c),
+            "bar_high": _rp(hi),
+            "bar_low": _rp(lo),
             "dist_pct": round((c - price) / price, 5),
             "bars_since_source_end": int(j - end_idx),
         })
@@ -224,7 +226,7 @@ def build_for_tf(tf: str, pair: str = paths.DEFAULT_PAIR) -> dict:
                 "source_range_id": r["range_id"],
                 "source_tf": tf,
                 "was_high": was_high,
-                "price": round(float(edge_price), 6),
+                "price": _rp(edge_price),
                 "source_end_ts": r["range_end_ts"],
                 "source_end_reason": r["range_end_reason"],
                 "level_available_ts": level_available_ts,   # source_end + recovery_lookahead (EXACT)
@@ -262,7 +264,7 @@ def build_for_tf(tf: str, pair: str = paths.DEFAULT_PAIR) -> dict:
         "levels": levels,
         "historical_level_events": all_events,
     }
-    paths.mem_json(tf, pair).write_text(json.dumps(result, indent=2), encoding="utf-8")
+    atomic_write_json(paths.mem_json(tf, pair), result)
     return result
 
 

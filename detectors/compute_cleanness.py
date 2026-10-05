@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.ioutil import atomic_write_json      # never leave a truncated artifact
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 
@@ -79,7 +80,7 @@ def compute_for_tf(tf: str, pair: str = paths.DEFAULT_PAIR) -> dict:
             "time_inside_band_pct": round(float(100 * np.mean((closes >= rll) & (closes <= rhu))), 1) if len(closes) else 0.0,
             "n_bos_absorbed": len(r["bos_inside_range"]),
         }
-    paths.l1_json(tf, pair).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    atomic_write_json(paths.l1_json(tf, pair), out)
     return {"tf": tf, "n_ranges": len(out["ranges"]), "n_confirmed": n_conf}
 
 

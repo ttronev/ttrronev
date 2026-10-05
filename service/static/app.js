@@ -48,10 +48,20 @@ const toggles = Object.assign(
   { strong: true, weak: true, ranges: true, events: true, verboseEvents: false },
   JSON.parse(localStorage.getItem("ttr_toggles") || "{}"));
 
+// Decimals to show for a price. Mirrors display_decimals() in
+// shared/pricefmt.py — keep the two in step. Below $0.10 a fixed 6 decimals
+// left SHIB (~0.000005) with one digit, so keep 4 significant digits instead.
+function priceDecimals(x) {
+  const ax = Math.abs(x);
+  if (ax >= 1000) return 1;
+  if (ax >= 10) return 2;
+  if (ax >= 0.1) return 4;
+  if (!ax || !Number.isFinite(ax)) return 2;
+  return Math.max(6, Math.min(14, 3 - Math.floor(Math.log10(ax))));
+}
 function fmtPrice(x) {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
-  const ax = Math.abs(x);
-  const d = ax >= 1000 ? 1 : ax >= 10 ? 2 : ax >= 0.1 ? 4 : 6;
+  const d = priceDecimals(x);
   return "$" + x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 function fmtTs(iso) {
@@ -124,6 +134,15 @@ function initPriceAxisZoom(host) {
 
 const mapCandles = (candles) => candles.map(([ts, o, h, l, c]) => ({
   time: ts / 1000, open: o, high: h, low: l, close: c }));
+
+// Price-axis precision follows the asset's scale. The library default
+// (2 decimals, minMove 0.01) draws every sub-$1 chart's axis as 0.00-0.10.
+function applyPriceFormat(candles) {
+  if (!series || !candles || !candles.length) return;
+  const d = priceDecimals(candles[candles.length - 1].close);
+  series.applyOptions({
+    priceFormat: { type: "price", precision: d, minMove: Math.pow(10, -d) } });
+}
 
 async function loadCandles(pair, tf, { force = false, signal = null } = {}) {
   const key = `${pair}:${tf}`;
@@ -205,6 +224,7 @@ async function switchView(pair, tf) {
     return;
   }
   if (gen !== viewGen) return;                 // a newer switch won
+  applyPriceFormat(candles);                   // BEFORE setData: axis fits the asset
   series.setData(candles);
   applyLiveToLastBar();
   renderOverlays(candles);
@@ -229,6 +249,7 @@ async function renderChart({ forceCandles = false } = {}) {
     return;
   }
   if (gen !== viewGen) return;                 // pair/TF switched mid-fetch
+  applyPriceFormat(candles);
   series.setData(candles);
   applyLiveToLastBar();
   renderOverlays(candles);

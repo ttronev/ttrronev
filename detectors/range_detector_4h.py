@@ -2,8 +2,8 @@
 detectors/range_detector_4h.py — 4H wrapper around range_detector_core.
 
 Calibrated 4H config (matches the approved v3.1 build):
-    analyzer_reversal_pct=0.035, retrace 0.725-0.750, recovery=12,
-    max_pending_bars=24 (=96h), min_pending_closes=3.
+    analyzer_reversal_pct=0.035, retrace >= 0.725 (arming threshold),
+    recovery=12, max_pending_bars=24 (=96h), min_pending_closes=3.
 """
 from __future__ import annotations
 import argparse, sys
@@ -22,7 +22,7 @@ def config() -> CoreRangeConfig:
     return CoreRangeConfig(
         timeframe="4h",
         analyzer_reversal_pct=0.035, analyzer_init_bars=20,
-        retrace_low=0.725, retrace_high=0.750,
+        retrace_low=0.725,
         band_zone_pct=0.25,
         recovery_lookahead=12,
         max_pending_bars=24,            # 24 4H bars = 96h

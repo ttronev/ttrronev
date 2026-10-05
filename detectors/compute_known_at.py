@@ -35,6 +35,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.ioutil import atomic_write_json      # never leave a truncated artifact
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 
@@ -64,7 +65,7 @@ def compute_for_tf(tf: str, pair: str = paths.DEFAULT_PAIR) -> dict:
         else:
             r["range_end_known_ts"] = None      # still active — end not knowable yet
         r["known_at_lag_bars"] = rl
-    paths.l1_json(tf, pair).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    atomic_write_json(paths.l1_json(tf, pair), out)
     return {"tf": tf, "rl": rl, "n_confirmed": n_conf}
 
 

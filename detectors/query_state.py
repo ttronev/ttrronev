@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.pricefmt import fmt_price            # scale-safe display (SHIB != "$0.00")
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 _L1 = lambda tf, pair=paths.DEFAULT_PAIR: paths.l1_json(tf, pair)
@@ -146,9 +147,9 @@ def fmt_ts(ts):
 def _report(pair=paths.DEFAULT_PAIR):
     s = State(pair)
     print(f"{'='*70}\nCURRENT STATE  {pair}  -  {fmt_ts(s.live_ts)}\n{'='*70}")
-    print(f"{paths.base_symbol(pair)} price (last 1H close): ${s.price:.2f}  (bar @ {fmt_ts(s.now)})")
+    print(f"{paths.base_symbol(pair)} price (last 1H close): {fmt_price(s.price)}  (bar @ {fmt_ts(s.now)})")
     if s.live_ok:
-        print(f"        live spot (NOW): ${s.live_price:.2f}  (fetched @ {fmt_ts(s.live_ts)})")
+        print(f"        live spot (NOW): {fmt_price(s.live_price)}  (fetched @ {fmt_ts(s.live_ts)})")
     else:
         print(f"        live spot: unavailable — using last 1H close")
     print()
@@ -161,8 +162,8 @@ def _report(pair=paths.DEFAULT_PAIR):
         days = (s.now - pd.Timestamp(r["range_phase_2_ts"])).days
         bars = s.bars_since(tf, r["range_phase_2_ts"])
         print(f"[{tf.upper()}] ACTIVE {r['range_id']}")
-        print(f"     band: low [{bp['low_band'][0]:.2f}, {bp['low_band'][1]:.2f}]  "
-              f"high [{bp['high_band'][0]:.2f}, {bp['high_band'][1]:.2f}]")
+        print(f"     band: low [{fmt_price(bp['low_band'][0])}, {fmt_price(bp['low_band'][1])}]  "
+              f"high [{fmt_price(bp['high_band'][0])}, {fmt_price(bp['high_band'][1])}]")
         print(f"     confirmed {r['range_phase_2_ts'][:10]}  ({days}d / {bars} {tf} bars ago)")
         print(f"     price position: {bp['zone']}  ({bp['pct_of_range']:+.0%} of range height)")
         print(f"     children: {r['child_range_ids']}\n")
@@ -173,20 +174,20 @@ def _report(pair=paths.DEFAULT_PAIR):
         ok = s.nests_in(d["range_id"], "1w")
         print(f"NESTING: active 1D {d['range_id']} in active 1W child_range_ids? {ok}\n")
 
-    print(f"{'-'*70}\nSTRONG/WEAK 1D levels within +/-5% of ${s.price:.2f}:")
+    print(f"{'-'*70}\nSTRONG/WEAK 1D levels within +/-5% of {fmt_price(s.price)}:")
     nd = s.near_levels("1d", 0.05)
     if not nd: print("   (none)")
     for L in nd:
-        print(f"   ${L['price']:>7.2f} ({L['dist_pct']:+.1%})  {L['class']:<6} "
+        print(f"   {fmt_price(L['price']):>12} ({L['dist_pct']:+.1%})  {L['class']:<6} "
               f"src={L['source']:<26} cyc={L['cycle_count']} "
               f"last={L['last_event']}@{(L['last_event_ts'] or '')[:10]}")
 
     for tf in ("4h", "2h"):
-        print(f"\nSTRONG/WEAK {tf.upper()} levels within +/-3% of ${s.price:.2f}:")
+        print(f"\nSTRONG/WEAK {tf.upper()} levels within +/-3% of {fmt_price(s.price)}:")
         nn = s.near_levels(tf, 0.03)
         if not nn: print("   (none)")
         for L in nn:
-            print(f"   ${L['price']:>7.2f} ({L['dist_pct']:+.1%})  {L['class']:<6} "
+            print(f"   {fmt_price(L['price']):>12} ({L['dist_pct']:+.1%})  {L['class']:<6} "
                   f"src={L['source']:<28} cyc={L['cycle_count']} "
                   f"last={L['last_event']}@{(L['last_event_ts'] or '')[:10]}")
 
@@ -195,7 +196,7 @@ def _report(pair=paths.DEFAULT_PAIR):
     if not ev: print("   (none)")
     for e in ev:
         print(f"   {e['ts'][:16]}  {e['tf']:>2}  {e['type']:<26} "
-              f"level ${e['level_price']:.2f} ({e['source_range_id']})  close=${e['bar_close']:.2f}")
+              f"level {fmt_price(e['level_price'])} ({e['source_range_id']})  close={fmt_price(e['bar_close'])}")
 
 
 if __name__ == "__main__":

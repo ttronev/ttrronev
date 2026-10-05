@@ -48,6 +48,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.ioutil import atomic_write_json      # never leave a truncated artifact
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 
@@ -126,7 +127,7 @@ def classify_tf(tf: str, pair: str = paths.DEFAULT_PAIR) -> dict:
         },
         "class_distribution": dist,
     }
-    paths.mem_json(tf, pair).write_text(json.dumps(mem, indent=2), encoding="utf-8")
+    atomic_write_json(paths.mem_json(tf, pair), mem)
     return {"tf": tf, "n_levels": len(mem["levels"]), "dist": dist}
 
 

@@ -75,7 +75,7 @@ def fetch_tf(pair: str, tf: str, log=print) -> int:
     that's a config error the worker must alert on, never silently skip."""
     from data.freshness_monitor import _okx, _base
     n, _first, last_new = _okx.extend_csv(_base(pair), tf,
-                                          data_dir=ROOT / "data" / "raw")
+                                          data_dir=paths.data_root())
     if log and n:
         import datetime as dt
         last_s = dt.datetime.fromtimestamp(last_new / 1000, tz=dt.timezone.utc

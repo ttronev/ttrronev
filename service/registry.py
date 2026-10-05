@@ -39,7 +39,7 @@ from detectors import paths
 from service.ioutil import atomic_write_json, read_json
 from service.pairs import PAIRS as SEED_PAIRS
 
-REGISTRY_PATH = paths.ROOT / "detectors" / "results" / "pairs.json"
+REGISTRY_PATH = paths.registry_json()      # honours TTRRONEV_RESULTS_ROOT (read at import)
 LOCK_PATH = REGISTRY_PATH.with_suffix(".lock")
 LOCK_STALE_S = 30              # a lockfile older than this = crashed holder
 LOCK_TIMEOUT_S = 10

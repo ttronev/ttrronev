@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.ioutil import atomic_write_json      # never leave a truncated artifact
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 CHILD_PARENT = [("1h", "2h"), ("2h", "4h"), ("4h", "1d"), ("1d", "1w")]
@@ -89,7 +90,7 @@ def run(verbose=True, pair=paths.DEFAULT_PAIR):
             parent["child_range_ids"].append(c["range_id"])
 
     for tf in TFS:
-        paths.l1_json(tf, pair).write_text(json.dumps(data[tf], indent=2), encoding="utf-8")
+        atomic_write_json(paths.l1_json(tf, pair), data[tf])
 
     if verbose:
         for child_tf, parent_tf in CHILD_PARENT:

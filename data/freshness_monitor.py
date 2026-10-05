@@ -27,10 +27,14 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # Load okx_fetch by path (avoids importing heavy/legacy package siblings).
 _spec = importlib.util.spec_from_file_location("okx_fetch", ROOT / "data" / "okx_fetch.py")
 _okx = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_okx)
+
+from detectors import paths as _paths       # path resolution only (stdlib-light)
 
 # Pair convention: the FULL CSV prefix, e.g. "SOL_USDT" (see detectors/paths.py).
 DEFAULT_PAIR = "SOL_USDT"
@@ -46,7 +50,7 @@ def _base(pair: str) -> str:
 
 
 def _csv_path(tf: str, pair: str = DEFAULT_PAIR) -> Path:
-    return ROOT / "data" / "raw" / f"{pair}_{tf}.csv"
+    return _paths.raw_csv(tf, pair)          # honours TTRRONEV_DATA_ROOT
 
 
 def _last_ts_ms(tf: str, pair: str = DEFAULT_PAIR):
@@ -99,7 +103,8 @@ def check_and_update(tfs=None, auto_fetch: bool = True, pair: str = DEFAULT_PAIR
         err = None
         if stale and auto_fetch and last is not None:
             try:
-                n, _f, _l = _okx.extend_csv(_base(pair), tf)
+                n, _f, _l = _okx.extend_csv(_base(pair), tf,
+                                            data_dir=_paths.data_root())
                 fetched = int(n)
                 last = _last_ts_ms(tf, pair)
                 age_h = (now_ms - last) / 3.6e6
@@ -197,6 +202,13 @@ def consumer_startup(end_consumer: bool = False, pair: str = DEFAULT_PAIR):
     p.add_argument("--no-regen", action="store_true")
     a, _ = p.parse_known_args()
     if a.no_freshness:
+        return
+    if _paths.is_sandboxed():
+        # A sandboxed run (TTRRONEV_RESULTS_ROOT set: research, experiment,
+        # test) must never append candles the live worker is also appending,
+        # nor trigger a full regen. It reads what its sandbox holds.
+        print(f"[freshness] sandbox ({_paths.ENV_RESULTS_ROOT} is set) -> "
+              f"no OKX fetch, no cascade regen.", flush=True)
         return
     ensure_fresh(regen=(end_consumer and not a.no_regen), pair=pair)
 

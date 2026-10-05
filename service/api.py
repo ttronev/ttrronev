@@ -322,7 +322,7 @@ def api_health():
     # bootstrap, all-error registry) — a vacuous per-pair pass is not ok.
     worker_alive = False
     try:
-        whb = _read_cached(paths.ROOT / "detectors" / "results" / "worker_heartbeat.json") or {}
+        whb = _read_cached(paths.worker_heartbeat_json()) or {}
         from datetime import datetime
         ts = whb.get("updated_at")
         if ts:

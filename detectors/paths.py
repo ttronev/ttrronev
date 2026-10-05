@@ -15,12 +15,29 @@ Raw candles stay flat: data/raw/{PAIR}_{tf}.csv (unchanged naming).
 
 Adding a pair requires NO path edits anywhere — every consumer resolves
 through these helpers. See service/pairs.py for the pair roster.
+
+SANDBOX ROOTS (isolation between the live service and research/experiments).
+Two environment variables redirect every path below, read at CALL time:
+
+    TTRRONEV_RESULTS_ROOT   replaces <repo>/detectors/results
+    TTRRONEV_DATA_ROOT      replaces <repo>/data/raw
+
+The live worker and research scripts used to share detectors/results/ and
+overwrite each other's files ("whichever ran last wins"). Any run that is NOT
+the live service — a calibration pass, an experiment, a test — must set
+TTRRONEV_RESULTS_ROOT to its own folder. When it is set, the freshness hook
+skips the OKX fetch and the cascade regen (see freshness_monitor), so a
+sandboxed run never writes candles or live artifacts.
 """
 from __future__ import annotations
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PAIR = "SOL_USDT"
+
+ENV_RESULTS_ROOT = "TTRRONEV_RESULTS_ROOT"
+ENV_DATA_ROOT = "TTRRONEV_DATA_ROOT"
 
 
 def base_symbol(pair: str = DEFAULT_PAIR) -> str:
@@ -33,12 +50,42 @@ def okx_inst_id(pair: str = DEFAULT_PAIR) -> str:
     return pair.replace("_", "-") + "-SWAP"
 
 
+def results_root() -> Path:
+    """Folder holding every pair's artifact dir plus the service-wide files
+    (pairs.json, worker_heartbeat.json, backfill_state.json)."""
+    v = os.environ.get(ENV_RESULTS_ROOT)
+    return Path(v).expanduser().resolve() if v else ROOT / "detectors" / "results"
+
+
+def data_root() -> Path:
+    """Folder holding the raw candle CSVs ({PAIR}_{tf}.csv)."""
+    v = os.environ.get(ENV_DATA_ROOT)
+    return Path(v).expanduser().resolve() if v else ROOT / "data" / "raw"
+
+
+def is_sandboxed() -> bool:
+    """True when artifacts are redirected away from the live results folder."""
+    return bool(os.environ.get(ENV_RESULTS_ROOT))
+
+
+def registry_json() -> Path:
+    return results_root() / "pairs.json"
+
+
+def worker_heartbeat_json() -> Path:
+    return results_root() / "worker_heartbeat.json"
+
+
+def backfill_state_json() -> Path:
+    return results_root() / "backfill_state.json"
+
+
 def results_dir(pair: str = DEFAULT_PAIR) -> Path:
-    return ROOT / "detectors" / "results" / pair
+    return results_root() / pair
 
 
 def raw_csv(tf: str, pair: str = DEFAULT_PAIR) -> Path:
-    return ROOT / "data" / "raw" / f"{pair}_{tf}.csv"
+    return data_root() / f"{pair}_{tf}.csv"
 
 
 def l1_json(tf: str, pair: str = DEFAULT_PAIR) -> Path:

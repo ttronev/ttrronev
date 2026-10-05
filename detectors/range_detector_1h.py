@@ -10,7 +10,7 @@ microstructure and should shape the bands — not be filtered as noise.
 
 Starting config (hourly = smaller swings, deeper retraces, longer holds
 in bar count):
-    analyzer_reversal_pct=0.015, init=48, retrace 0.40-0.65,
+    analyzer_reversal_pct=0.015, init=48, retrace >= 0.40 (arming threshold),
     band_zone=0.25 (looser, like 4H), recovery_lookahead=24 (=1 day),
     max_pending_bars=48 (=2 days).
 """
@@ -27,11 +27,14 @@ from detectors.range_detector_core import CoreRangeConfig, detect_ranges, save_j
 from detectors import paths
 
 
-def config(retrace_low=0.40, retrace_high=0.65) -> CoreRangeConfig:
+RETRACE_LOW = 0.40              # single source for config() / run() / CLI
+
+
+def config(retrace_low=RETRACE_LOW) -> CoreRangeConfig:
     return CoreRangeConfig(
         timeframe="1h",
         analyzer_reversal_pct=0.015, analyzer_init_bars=48,
-        retrace_low=retrace_low, retrace_high=retrace_high,
+        retrace_low=retrace_low,
         band_zone_pct=0.25,
         # Calibrated for fine sub-range nesting inside 4H ranges:
         #  * recovery_lookahead 24 made 1H ranges span weeks (≈ 4H scale,
@@ -51,14 +54,14 @@ def config(retrace_low=0.40, retrace_high=0.65) -> CoreRangeConfig:
 
 
 def run(data_1h=None, out_json=None,
-        retrace_low=0.40, retrace_high=0.65, pair=None):
+        retrace_low=RETRACE_LOW, pair=None):
     pair = pair or paths.DEFAULT_PAIR
     data_1h = data_1h or paths.raw_csv("1h", pair)
     out_json = out_json or paths.ensure_results_dir(pair) / "range_detector_1h_layer1.json"
     df = pd.read_csv(data_1h).drop_duplicates("timestamp").sort_values("timestamp")
     # detection TF and bias TF are both 1H here.
     df_bias = df
-    output, ranges = detect_ranges(df, df_bias, config(retrace_low, retrace_high))
+    output, ranges = detect_ranges(df, df_bias, config(retrace_low))
     save_json(output, Path(out_json))
     return output, ranges
 
@@ -70,8 +73,7 @@ if __name__ == "__main__":
     p.add_argument("--pair", default=None)
     p.add_argument("--data-1h", default=None)
     p.add_argument("--out-json", default=None)
-    p.add_argument("--retrace-low", type=float, default=0.40)
-    p.add_argument("--retrace-high", type=float, default=0.65)
+    p.add_argument("--retrace-low", type=float, default=RETRACE_LOW)
     p.add_argument("--no-freshness", action="store_true", help="Skip pre-run data freshness check.")
     a = p.parse_args()
     if not a.no_freshness:
@@ -80,8 +82,8 @@ if __name__ == "__main__":
             check_and_update(pair=a.pair or paths.DEFAULT_PAIR)
         except Exception as e:
             print(f"[freshness] skipped ({e})")
-    out, ranges = run(a.data_1h, a.out_json, a.retrace_low, a.retrace_high, pair=a.pair)
-    print(f"[range_detector_1h] retrace={a.retrace_low}-{a.retrace_high}  "
+    out, ranges = run(a.data_1h, a.out_json, a.retrace_low, pair=a.pair)
+    print(f"[range_detector_1h] retrace>={a.retrace_low}  "
           f"{out['n_ranges_total']} records, confirmed={out['n_confirmed']} "
           f"timeout={out['n_phase_1_timeout']} failed={out['n_phase_1_failed']} "
           f"-> {a.out_json or paths.l1_json('1h', a.pair or paths.DEFAULT_PAIR)}")
