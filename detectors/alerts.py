@@ -43,6 +43,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detectors import paths
+from shared.pricefmt import fmt_price, price_key   # scale-safe text + dedup keys
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 _STATE_PATH = lambda pair=paths.DEFAULT_PAIR: paths.alerts_state(pair)
@@ -84,17 +85,22 @@ def _load_dotenv():
         os.environ.setdefault(k.strip(), v.strip())
 
 
-def _telegram_send(text: str, dry_run: bool, log=print) -> bool:
-    """Send one DM. dry_run (or missing creds) -> print only. Returns True if
-    delivered/printed. The bot token is never logged."""
+def _deliver(text: str, dry_run: bool, log=print) -> str:
+    """Deliver one message. Returns
+        'sent'     Telegram accepted it;
+        'printed'  intentionally NOT sent — dry-run, or no creds configured
+                   (log-only mode): printing IS the delivery channel;
+        'failed'   a send was attempted and did not succeed.
+    Callers must treat 'failed' as not-delivered (retry later), never as done.
+    The bot token is never logged."""
     if dry_run:
         log("---- WOULD SEND ----\n" + text + "\n--------------------")
-        return True
+        return "printed"
     token = os.environ.get("TTRRONEV_TG_BOT_TOKEN")
     chat = os.environ.get("TTRRONEV_TG_CHAT_ID")
     if not token or not chat:
         log("[alerts] no Telegram creds in env -> printing instead:\n" + text)
-        return False
+        return "printed"
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = json.dumps({"chat_id": chat, "text": text,
                           "disable_web_page_preview": True}).encode("utf-8")
@@ -102,10 +108,17 @@ def _telegram_send(text: str, dry_run: bool, log=print) -> bool:
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status == 200
+            return "sent" if resp.status == 200 else "failed"
     except Exception as e:                      # never echo the URL (has token)
         log(f"[alerts] telegram send failed: {type(e).__name__}")
-        return False
+        return "failed"
+
+
+def _telegram_send(text: str, dry_run: bool, log=print) -> bool:
+    """Bool wrapper kept for existing callers (worker error DMs,
+    --test-telegram): True if sent, or printed by an explicit dry-run."""
+    status = _deliver(text, dry_run, log=log)
+    return status == "sent" or (dry_run and status == "printed")
 
 
 # --------------------------------------------------------------- scanning
@@ -142,7 +155,7 @@ def _range_break_alert(state, tf):
             "level_price": lvl, "dist": (lvl - price) / price, "strength": "RANGE",
             "src": r["range_id"], "ts": state.now.isoformat(),
             "last_event": (f"range_{side}", r["range_phase_2_ts"][:10]),
-            "dedup_key": f"{tf}:range_{side}_{round(lvl, 6)}:broken"}
+            "dedup_key": f"{tf}:range_{side}_{price_key(lvl)}:broken"}
 
 
 def _confluence(touched):
@@ -169,7 +182,10 @@ def _confluence(touched):
                         "level_price": avg, "dist": None, "strength": f"{len(group)}x",
                         "src": ",".join(sorted({g["src"] for g in group})),
                         "ts": max(g["ts"] for g in group), "last_event": None,
-                        "dedup_key": f"confluence:{round(avg, 2)}"})
+                        # 4 significant digits: the same ~0.01-0.1% bucket at
+                        # every price scale (round(avg, 2) put every sub-cent
+                        # cluster in the single bucket "0.0").
+                        "dedup_key": f"confluence:{avg:.4g}"})
     return out
 
 
@@ -191,7 +207,7 @@ def _proximity_alerts(state, price, proximity_pct=PROXIMITY_THRESHOLD_PCT):
                             "level_price": L["price"], "dist": d, "strength": strg,
                             "src": L["source_range_id"], "ts": state.now.isoformat(),
                             "last_event": (L.get("last_event_type"), L.get("last_event_ts")),
-                            "dedup_key": f"proximity:{tf}:{round(L['price'], 6)}"})
+                            "dedup_key": f"proximity:{tf}:{price_key(L['price'])}"})
     return out
 
 
@@ -226,7 +242,7 @@ def scan(state, recency_h, proximity_pct=PROXIMITY_THRESHOLD_PCT):
             a = {"tf": tf.upper(), "etype": etype, "level_id": lid, "level_price": lp,
                  "dist": dist, "strength": strg, "src": e["source_range_id"],
                  "ts": e["ts"], "last_event": last_of.get(lid),
-                 "dedup_key": f"{tf}:{round(lp, 6)}:{etype}"}   # price-based: stable across window renumbering
+                 "dedup_key": f"{tf}:{price_key(lp)}:{etype}"}   # price-based: stable across window renumbering
             alerts.append(a)
             if etype == "historical_level_touched":
                 touched.append(a)
@@ -251,21 +267,23 @@ def _fmt_ts(ts):
 
 def format_alert(a, price, state):
     pair = getattr(state, "pair", paths.DEFAULT_PAIR)
+    # Prices via fmt_price (magnitude-aware): ':.2f' printed SHIB as "$0.00"
+    # and two different DOGE levels both as "$0.09".
     ctx = (f"context: 1D={_zone(state.band_position('1d'))}, "
-           f"1W={_zone(state.band_position('1w'))}  (live ${state.live_price:.2f} @ {_fmt_ts(state.live_ts)})")
+           f"1W={_zone(state.band_position('1w'))}  (live {fmt_price(state.live_price)} @ {_fmt_ts(state.live_ts)})")
     if a["etype"] == "PROXIMITY":
         sign = "+" if a["dist"] >= 0 else "-"
-        line1 = (f"[{pair}] [PROXIMITY] price ${price:.2f} approaching ${a['level_price']:.2f} "
+        line1 = (f"[{pair}] [PROXIMITY] price {fmt_price(price)} approaching {fmt_price(a['level_price'])} "
                  f"({sign}{abs(a['dist'])*100:.2f}%) | strength: {str(a['strength']).upper()} | src: {a['src']}")
         return line1 + "\n" + ctx
     ev = a["etype"].replace("historical_level_", "").upper()
     if a["dist"] is None:
         dist_str = "confluence"
     else:
-        dist_str = f"{'+' if a['dist'] >= 0 else ''}{a['dist']*100:.1f}% from current ${price:.2f}"
+        dist_str = f"{'+' if a['dist'] >= 0 else ''}{a['dist']*100:.1f}% from current {fmt_price(price)}"
     le = a["last_event"]
     last_str = f"{le[0]}@{le[1][:10]}" if le and le[0] else "none"
-    line1 = (f"[{pair}] [{a['tf']}] {ev} level ${a['level_price']:.2f} ({dist_str}) | "
+    line1 = (f"[{pair}] [{a['tf']}] {ev} level {fmt_price(a['level_price'])} ({dist_str}) | "
              f"strength: {str(a['strength']).upper()} | src: {a['src']} | last: {last_str}")
     return line1 + "\n" + ctx
 
@@ -314,11 +332,16 @@ def run_once(dry_run=False, recency_h=ALERT_RECENCY_HOURS,
     if fired is None:
         fired = _load_state(pair)
     candidates = sorted(scan(state, recency_h, proximity_pct), key=lambda a: a["ts"])
-    n_new = 0
+    n_new = n_failed = 0
     for a in candidates:
         if not _should_fire(a, fired):
             continue
-        _telegram_send(format_alert(a, state.live_price, state), dry_run, log=log)
+        status = _deliver(format_alert(a, state.live_price, state), dry_run, log=log)
+        if status == "failed":
+            # NOT marked fired: a Telegram outage must not silently swallow
+            # the alert — it is retried on the next scan while still recent.
+            n_failed += 1
+            continue
         fired[a["dedup_key"]] = a["ts"]
         n_new += 1
     if not dry_run:
@@ -326,8 +349,9 @@ def run_once(dry_run=False, recency_h=ALERT_RECENCY_HOURS,
     price = state.live_price; live_ts = state.live_ts
     del state, candidates
     gc.collect()
-    log(f"[alerts] scan complete: {n_new} new alert(s) at live ${price:.2f} "
+    log(f"[alerts] scan complete: {n_new} new alert(s) at live {fmt_price(price)} "
         f"(fetched @ {_fmt_ts(live_ts)})"
+        + (f"; {n_failed} NOT delivered (will retry next scan)" if n_failed else "")
         + ("  (dry-run: state NOT persisted)" if dry_run else ""))
     return n_new, fired
 
