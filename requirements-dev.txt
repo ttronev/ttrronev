@@ -1,0 +1,3 @@
+# Test tooling only. The service image installs requirements-service.txt and
+# nothing from this file. CI installs both (see .github/workflows/tests.yml).
+pytest==9.1.1
