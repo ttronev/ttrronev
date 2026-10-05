@@ -23,6 +23,9 @@ services:
       # everything else under results/ is still worker-owned.
       - ./detectors/results:/app/detectors/results
     ports:
-      - "127.0.0.1:8000:8000"   # localhost only; Caddy proxies + auths outside
+      # Host port defaults to 8000 — the documented contract (README, service
+      # runbook, deploy/Caddyfile.example). Override per machine WITHOUT editing
+      # this file: put TTRRONEV_PORT=NNNN in .env (compose reads it) or the shell.
+      - "127.0.0.1:${TTRRONEV_PORT:-8000}:8000"   # localhost only; Caddy proxies + auths outside
     depends_on: [worker]
     restart: unless-stopped
