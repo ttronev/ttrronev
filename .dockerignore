@@ -30,3 +30,9 @@ sol_3rr_trade_log.csv
 *.pyc
 *.png
 *.log
+
+# frontend: the image builds frontend/dist itself in a node stage (B0a)
+frontend/node_modules
+frontend/dist-mock
+frontend/playwright-report
+frontend/test-results

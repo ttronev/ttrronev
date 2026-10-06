@@ -1,0 +1,20 @@
+{
+  "$schema": "./stages.schema.json",
+  "updated": "2026-10-06",
+  "source": "ТЗ-B0 stage map; the master plan document is the source of truth and the coding agent updates this file in the commit that changes a stage's status",
+  "stages": [
+    { "id": "A0", "name": "Service on the VPS", "track": "A", "depends_on": [], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "A2", "name": "Scorecard: placebo lift", "track": "A", "depends_on": ["A0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B0", "name": "App shell v0", "track": "B", "depends_on": [], "status": "in_progress", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B3", "name": "Desk: zones + volume profile", "track": "B", "depends_on": ["B0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B4", "name": "Journal + live log", "track": "B", "depends_on": ["B0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B5", "name": "Candidate finders", "track": "B", "depends_on": ["B0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B6", "name": "Candidate cards (Take / Skip / Watch)", "track": "B", "depends_on": ["B4", "B5"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B7", "name": "Execution adapter (paper)", "track": "B", "depends_on": ["B4"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B8", "name": "Agent chat + agent log", "track": "B", "depends_on": ["B0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B9", "name": "Release gate", "track": "B", "depends_on": ["B6", "B8"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B11", "name": "Strategies + backtests", "track": "B", "depends_on": ["B9"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B12", "name": "Bots + connections", "track": "B", "depends_on": ["B7", "B9"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" },
+    { "id": "B13", "name": "Account cabinet", "track": "B", "depends_on": ["B9"], "status": "not_started", "evidence_url": null, "updated": "2026-10-06" }
+  ]
+}

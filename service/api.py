@@ -366,3 +366,42 @@ def index():
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# --- App shell (B0a) -------------------------------------------------------
+# The React build (frontend/dist) is served under /app; the legacy dashboard
+# keeps "/" until Desk parity is verified and it is removed in its own commit.
+# Deep links (/app/admin/health) fall back to index.html. index.html is never
+# cached (a cached index was the "pushed but nothing changed" symptom of the
+# old page); hashed assets under /app/assets are immutable.
+APP_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+
+
+def _app_asset(rel: str) -> Path | None:
+    """A file inside APP_DIST for the request path, or None (never outside it)."""
+    if not rel:
+        return None
+    root = APP_DIST.resolve()
+    try:
+        candidate = (root / rel).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if candidate == root or not candidate.is_relative_to(root) or not candidate.is_file():
+        return None
+    return candidate
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{rest:path}", include_in_schema=False)
+def app_shell(rest: str = ""):
+    index = APP_DIST / "index.html"
+    if not index.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="app shell not built: run `npm run build` in frontend/ (the Docker image builds it)",
+        )
+    asset = _app_asset(rest)
+    if asset is not None:
+        cache = "public, max-age=31536000, immutable" if rest.startswith("assets/") else "no-cache"
+        return FileResponse(asset, headers={"Cache-Control": cache})
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
