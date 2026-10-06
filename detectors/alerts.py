@@ -123,7 +123,8 @@ def _telegram_send(text: str, dry_run: bool, log=print) -> bool:
 
 # --------------------------------------------------------------- scanning
 def _recent_closes(tf, n, pair=paths.DEFAULT_PAIR):
-    df = pd.read_csv(_CSV(tf, pair), usecols=["close"])
+    from shared.csvtail import read_tail          # tail only, not the whole file
+    df = read_tail(_CSV(tf, pair), rows=n, columns=["close"])
     out = df["close"].to_numpy(float)[-n:]
     del df
     return out

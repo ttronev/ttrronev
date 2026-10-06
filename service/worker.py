@@ -61,9 +61,15 @@ from service.pairs import (
     CYCLE_WARN_S_DEFAULT, PAIR_JITTER_S, BACKFILL_ORDER,
 )
 from service.sharding import shard_pairs
+from shared.memhygiene import peak_rss_mb
 
 REGISTRY_POLL_S = 10            # how often the worker re-reads pairs.json
 BOOTSTRAP_TF_PAUSE_S = 1.0      # politeness pause between bootstrap TF steps
+
+# A pair whose 5m cycle fails this many passes in a row WHILE other pairs
+# succeed is moved to status=error (see Worker._update_quarantine). 12 passes
+# = about an hour.
+QUARANTINE_AFTER = 12
 
 # 5m pass budget (log + Telegram warning past this). Env-overridable so the
 # acceptance test can trip it deliberately.
@@ -103,6 +109,9 @@ class Worker:
                                             thread_name_prefix="live")
         self.last_error_at: dict[str, float] = {}      # error key -> monotonic ts
         self.alert_fired: dict[str, dict] = {}          # pair -> dedup map
+        self.fail_streak: dict[str, int] = {}           # pair -> consecutive failed 5m passes
+        self.phase = "startup"                          # -> "running" once startup regen is done
+        self.started_at = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
 
     # ------------------------------------------------------------- errors
     def report_error(self, key: str, exc: BaseException) -> None:
@@ -180,7 +189,15 @@ class Worker:
     def _structural_cycle_sync(self, pair: str, boundary_ms: int) -> None:
         """One structural-boundary cycle. Runs on the regen executor."""
         t0 = time.monotonic()
-        due = _due_structural_tfs(boundary_ms)
+        clock_due = _due_structural_tfs(boundary_ms)
+        # Catch-up by data, not only by clock: a boundary missed while the
+        # process was stalled/down, or a fetch that failed, used to leave that
+        # timeframe stale until its OWN next close (up to a day for 1d).
+        behind = [tf for tf in regen.behind_tfs(pair, boundary_ms) if tf not in clock_due]
+        if behind:
+            log(f"[worker] {pair} structural: catching up {behind} "
+                f"(CSV is behind the last closed bar)")
+        due = [tf for tf in STRUCTURAL_TFS if tf in clock_due or tf in behind]
         fetched: dict[str, int] = {}
         for tf in due:
             try:
@@ -188,8 +205,9 @@ class Worker:
             except Exception as e:
                 self.report_error(f"{pair}:{tf}:fetch", e)
         # One batch retry for TFs whose closed bar isn't published yet
-        # (1w is exempt: 0 new rows on a non-week-close day is normal).
-        missing = [tf for tf in due if tf != "1w" and fetched.get(tf) == 0]
+        # (1w is exempt: 0 new rows on a non-week-close day is normal; a
+        # catch-up TF returning nothing means the exchange has nothing newer).
+        missing = [tf for tf in clock_due if tf != "1w" and fetched.get(tf) == 0]
         if missing:
             time.sleep(FETCH_RETRY_DELAY_S)
             for tf in missing:
@@ -271,7 +289,7 @@ class Worker:
 
     # ---------------------------------------------------------- backfill
     def _backfill_state_file(self):
-        return paths.ROOT / "detectors" / "results" / "backfill_state.json"
+        return paths.backfill_state_json()
 
     def _next_backfill(self):
         """Next (pair, tf) whose deep history isn't complete, cheap TFs
@@ -290,18 +308,31 @@ class Worker:
             state.setdefault(pair, {})[tf] = "complete"
             atomic_write_json(self._backfill_state_file(), state)
 
+    async def heartbeat_loop(self) -> None:
+        """Worker-level liveness, stamped every REGISTRY_POLL_S so /api/health
+        can tell a dead worker from one that is catching up. Runs as its own
+        task, started BEFORE the startup regen: the stamp used to live in the
+        registry loop, which only starts after startup, so health reported the
+        worker dead for the whole of every restart."""
+        while True:
+            try:
+                atomic_write_json(paths.worker_heartbeat_json(), {
+                    "updated_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"),
+                    "phase": self.phase,
+                    "started_at": self.started_at,
+                })
+            except Exception as e:
+                self.report_error("worker-heartbeat", e)
+            await asyncio.sleep(REGISTRY_POLL_S)
+
     async def registry_loop(self) -> None:
         """Re-read pairs.json every REGISTRY_POLL_S (by mtime) and bootstrap
-        new pairs strictly one at a time, oldest added_ts first. Also stamps
-        the worker-level heartbeat so /api/health can detect a dead worker
-        even when no pair is ready yet, and — when NO bootstrap is pending —
-        runs one low-priority deep-backfill slice per pass."""
+        new pairs strictly one at a time, oldest added_ts first; when NO
+        bootstrap is pending, run one low-priority deep-backfill slice per
+        pass. (Worker liveness is stamped by heartbeat_loop.)"""
         last_mtime = -1
         while True:
             try:
-                atomic_write_json(
-                    paths.ROOT / "detectors" / "results" / "worker_heartbeat.json",
-                    {"updated_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")})
                 m = registry.mtime_ns()
                 if m != last_mtime:
                     last_mtime = m
@@ -329,18 +360,79 @@ class Worker:
             await asyncio.sleep(REGISTRY_POLL_S)
 
     def _startup_sync(self, pair: str) -> None:
-        """Cold start: fetch + regen every TF once so state.json exists."""
-        log(f"[worker] {pair}: startup regen of {WORKER_TFS}")
+        """Bring one pair up to date at process start. Every timeframe is
+        fetched (cheap when nothing is new); a timeframe is REGENERATED only
+        if new candles arrived, its artifact is missing/older than its CSV, or
+        the detection code changed since the artifacts were written (see
+        'restart logic' in service/regen.py). A restart with current data and
+        unchanged code costs a few HTTP calls per pair, not a full regen."""
+        force = regen.read_marker(pair).get("fingerprint") != regen.code_fingerprint()
+        regen_tfs, verified = [], []
         for tf in STRUCTURAL_TFS + ["5m"]:
+            fetched, fetch_ok = 0, True
             try:
-                regen.fetch_tf(pair, tf, log=log)
+                fetched = regen.fetch_tf(pair, tf, log=log)
             except Exception as e:
+                fetch_ok = False
                 self.report_error(f"{pair}:{tf}:startup-fetch", e)
-            regen.regen_detector(pair, tf, log=log)
-        regen.regen_chain(pair, log=log)
+            if force or fetched > 0 or regen.l1_is_stale(pair, tf):
+                regen.regen_detector(pair, tf, log=log)
+                regen_tfs.append(tf)
+            if fetch_ok:
+                verified.append(tf)          # confirmed current as of now
+        if (force or any(tf in MEMORY_TFS for tf in regen_tfs)
+                or regen.chain_outputs_missing(pair)):
+            regen.regen_chain(pair, log=log)
         self._rebuild_state_and_alerts(pair)
-        self._heartbeat(pair, WORKER_TFS)
-        log(f"[worker] {pair}: startup complete")
+        # Stamp only what was verified: a timeframe whose fetch failed keeps
+        # its old stamp, so health goes stale instead of claiming freshness.
+        self._heartbeat(pair, verified)
+        regen.write_marker(pair)
+        if regen_tfs:
+            log(f"[worker] {pair}: startup complete — regenerated {regen_tfs}"
+                + (" (detection code changed)" if force else ""))
+        else:
+            log(f"[worker] {pair}: startup complete — artifacts current, nothing regenerated")
+
+    def _update_quarantine(self, ok_pairs: list, failed: list) -> list:
+        """Handle PAIR-SPECIFIC failure. A pair whose 5m cycle keeps failing
+        while other pairs succeed (delisted instrument, corrupt CSV) is moved
+        to status=error after QUARANTINE_AFTER consecutive failed passes: it
+        leaves the cycles and stops holding the service's health red forever.
+        Re-adding it from the dashboard retries it.
+
+        A pass in which NO pair succeeded is a systemic outage (exchange or
+        network down) and never counts — otherwise an hour of OKX downtime
+        would quarantine the whole universe. `failed` is [(pair, exc), ...].
+        Returns the pairs quarantined by this call."""
+        for p in ok_pairs:
+            self.fail_streak.pop(p, None)
+        if not ok_pairs:
+            return []
+        quarantined = []
+        for p, exc in failed:
+            n = self.fail_streak.get(p, 0) + 1
+            self.fail_streak[p] = n
+            if n < QUARANTINE_AFTER:
+                continue
+            reason = f"quarantined after {n} failed 5m cycles: {str(exc)[:140]}"
+            try:
+                registry.update_entry(p, status=registry.ERROR, error_reason=reason)
+            except Exception as e:
+                self.report_error(f"{p}:quarantine:registry-write", e)
+                continue
+            self.fail_streak.pop(p, None)
+            quarantined.append(p)
+            log(f"[worker] {p}: QUARANTINED — {reason}")
+            try:
+                self.live_pool.submit(
+                    _telegram_send,
+                    f"⚠️ ttrronev-service: {p} quarantined\n{reason}\n"
+                    f"Other pairs are unaffected. Re-add it from the dashboard to retry.",
+                    False, lambda m: None)
+            except Exception:
+                pass
+        return quarantined
 
     def _live_sync(self, pair: str) -> None:
         from data.freshness_monitor import get_live_price
@@ -364,7 +456,7 @@ class Worker:
             run_at = scheduler.next_run_at_ms("5m", now_ms)
             await asyncio.sleep(max(0.0, (run_at - now_ms) / 1000))
             t0 = time.monotonic()
-            per_pair = []
+            per_pair, ok_pairs, failed = [], [], []
             for i, pair in enumerate(self._my_pairs()):
                 if i:                          # jitter: no aligned API bursts
                     await asyncio.sleep(PAIR_JITTER_S + random.random() * PAIR_JITTER_S)
@@ -372,14 +464,20 @@ class Worker:
                 try:
                     await loop.run_in_executor(
                         self.regen_pool, self._cycle_5m_sync, pair)
+                    ok_pairs.append(pair)
                 except Exception as e:
                     self.report_error(f"{pair}:5m:cycle", e)
+                    failed.append((pair, e))
                 per_pair.append((pair, time.monotonic() - tp))
+            self._update_quarantine(ok_pairs, failed)
             if per_pair:
                 total = time.monotonic() - t0
                 breakdown = ", ".join(f"{p}: {d:.1f}s" for p, d in per_pair)
+                rss = peak_rss_mb()
                 log(f"[worker] 5m pass: total {total:.1f}s over "
-                    f"{len(per_pair)} pair(s) ({breakdown})")
+                    f"{len(per_pair)} pair(s)"
+                    + (f", peak RSS {rss:.0f} MB" if rss is not None else "")
+                    + f" ({breakdown})")
                 if total > CYCLE_WARN_S:
                     self.report_error(
                         "5m-pass-budget",
@@ -419,19 +517,24 @@ class Worker:
         log(f"[worker] starting: ready={ready} tfs={WORKER_TFS}"
             + (" [alerts DRY-RUN]" if ALERTS_DRY_RUN else ""))
         loop = asyncio.get_running_loop()
+        hb_task = asyncio.create_task(self.heartbeat_loop())   # FIRST: alive during startup
         live_task = asyncio.create_task(self.live_loop())
+        t0 = time.monotonic()
         for pair in ready:
             try:
                 await loop.run_in_executor(self.regen_pool, self._startup_sync, pair)
             except Exception as e:
                 self.report_error(f"{pair}:startup", e)
+        self.phase = "running"
+        log(f"[worker] startup finished for {len(ready)} pair(s) in "
+            f"{time.monotonic() - t0:.0f}s; entering bar-close loops")
         tasks = [asyncio.create_task(self.five_min_loop()),
                  asyncio.create_task(self.structural_loop()),
                  asyncio.create_task(self.registry_loop())]
         try:
-            await asyncio.gather(live_task, *tasks)
+            await asyncio.gather(hb_task, live_task, *tasks)
         finally:
-            for t in (live_task, *tasks):
+            for t in (hb_task, live_task, *tasks):
                 t.cancel()
             self.regen_pool.shutdown(wait=False, cancel_futures=True)
             self.live_pool.shutdown(wait=False, cancel_futures=True)

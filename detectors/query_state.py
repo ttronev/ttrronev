@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from detectors import paths
 from shared.pricefmt import fmt_price            # scale-safe display (SHIB != "$0.00")
+from shared.csvtail import read_tail             # tail-only CSV reads
 
 TFS = ["1w", "1d", "4h", "2h", "1h"]
 _L1 = lambda tf, pair=paths.DEFAULT_PAIR: paths.l1_json(tf, pair)
@@ -50,7 +51,9 @@ class State:
                 self._l1["5m"] = json.loads(p5.read_text())
             except Exception:
                 pass
-        h = (pd.read_csv(_CSV("1h", pair)).drop_duplicates("timestamp")
+        # Only the newest 1H bar is needed: read the file's tail, not all of it
+        # (this object is built per pair on every service cycle).
+        h = (read_tail(_CSV("1h", pair), rows=8).drop_duplicates("timestamp")
              .sort_values("timestamp"))
         self.price = float(h["close"].iloc[-1])          # last CLOSED 1H bar (what detectors consume)
         self.now = pd.to_datetime(h["timestamp"].iloc[-1], unit="ms", utc=True)

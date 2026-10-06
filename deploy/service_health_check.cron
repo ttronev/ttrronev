@@ -1,0 +1,14 @@
+# External watchdog for ttrronev-service — see deploy/service_health_check.sh.
+# Checks /api/health every 5 minutes from the HOST and sends a Telegram alert
+# after 2 consecutive failures (API down / worker dead / data stale), plus a
+# recovery notice. Runs outside Docker so it reports when Docker itself is down.
+#
+# Install (as root):
+#   chmod +x /opt/ttrronev/deploy/service_health_check.sh
+#   cp /opt/ttrronev/deploy/service_health_check.cron /etc/cron.d/ttrronev-service-health
+#   chmod 644 /etc/cron.d/ttrronev-service-health
+#   install -m 600 /dev/null /opt/ttrronev/.env-cron     # then add the two TG lines
+#
+# Test once by hand:  /opt/ttrronev/deploy/service_health_check.sh ; echo "exit=$?"
+
+*/5 * * * * root /opt/ttrronev/deploy/service_health_check.sh >> /var/log/ttrronev_service_health.log 2>&1

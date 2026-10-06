@@ -32,13 +32,102 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from detectors import paths
-from service.pairs import (MEMORY_TFS, REGEN_WINDOW_DAYS,
+from shared import csvtail
+from service.pairs import (MEMORY_TFS, REGEN_WINDOW_DAYS, TF_MS,
                            BACKFILL_5M_MAX_DAYS)
 
 DAY_MS = 24 * 60 * 60 * 1000
 
 # TFs whose detector takes a separate 1h bias CSV (1h and 5m self-bias).
 _BIAS_TFS = {"1w", "1d", "4h", "2h"}
+
+# ------------------------------------------------------------ restart logic
+# A restart used to regenerate every timeframe of every pair (~15 min for 19
+# pairs) whether or not anything had changed. Now a timeframe is regenerated
+# at startup only if (a) new candles arrived, (b) its artifact is missing or
+# older than its CSV, or (c) the code that produces artifacts changed since
+# they were written. (c) is detected with a fingerprint of the detection
+# source files, stored per pair in regen_marker.json — so deploying a detector
+# change forces exactly one full regen, with no version number to remember.
+_FINGERPRINT_FILES = (
+    ["detectors/range_detector_core.py"]
+    + [f"detectors/range_detector_{tf}.py" for tf in ("1w", "1d", "4h", "2h", "1h", "5m")]
+    + ["detectors/compute_cleanness.py", "detectors/cascade_nesting.py",
+       "detectors/compute_known_at.py", "detectors/layer5_range_memory.py",
+       "detectors/layer5_1_strength.py",
+       "shared/structure_analyzer.py", "shared/structure_analyzer_close_based.py",
+       "shared/pricefmt.py", "service/pairs.py"]
+)
+_fingerprint_cache: str | None = None
+
+
+def code_fingerprint(files=None, root: Path = ROOT) -> str:
+    """Short hash of the source files that determine detector/chain output.
+    Line endings are normalised so a Windows checkout and the Linux image of
+    the same commit agree."""
+    global _fingerprint_cache
+    if files is None and _fingerprint_cache is not None:
+        return _fingerprint_cache
+    import hashlib
+    h = hashlib.sha256()
+    for rel in sorted(files if files is not None else _FINGERPRINT_FILES):
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update((Path(root) / rel).read_bytes().replace(b"\r\n", b"\n"))
+        h.update(b"\0")
+    fp = h.hexdigest()[:16]
+    if files is None:
+        _fingerprint_cache = fp
+    return fp
+
+
+def marker_path(pair: str) -> Path:
+    return paths.results_dir(pair) / "regen_marker.json"
+
+
+def read_marker(pair: str) -> dict:
+    from shared.ioutil import read_json
+    m = read_json(marker_path(pair), default={})
+    return m if isinstance(m, dict) else {}
+
+
+def write_marker(pair: str) -> None:
+    from shared.ioutil import atomic_write_json
+    atomic_write_json(marker_path(pair), {
+        "fingerprint": code_fingerprint(),
+        "written_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")})
+
+
+def l1_is_stale(pair: str, tf: str) -> bool:
+    """True when the layer-1 artifact is missing, or older than its candle
+    CSV (candles were appended but the detector has not run since — e.g. the
+    process died between fetch and regen)."""
+    l1, csv = paths.l1_json(tf, pair), paths.raw_csv(tf, pair)
+    try:
+        return l1.stat().st_mtime < csv.stat().st_mtime
+    except OSError:
+        return True
+
+
+def chain_outputs_missing(pair: str) -> bool:
+    return any(not paths.mem_json(tf, pair).exists() for tf in MEMORY_TFS)
+
+
+def behind_tfs(pair: str, boundary_ms: int, tfs=("1d", "4h", "2h", "1h")) -> list[str]:
+    """Timeframes whose CSV does not yet hold the bar that closed at or before
+    `boundary_ms`. The structural loop only knows which timeframes close ON a
+    boundary; a boundary missed while the process was stalled or down, or a
+    fetch that failed, would otherwise leave that timeframe stale until its
+    own next close (up to a day for 1d). 1w is excluded: it is polled at the
+    daily boundary and a fetch returning nothing is normal."""
+    out = []
+    for tf in tfs:
+        step = TF_MS[tf]
+        last_closed_open = (boundary_ms // step) * step - step
+        last = csvtail.last_ts_ms(paths.raw_csv(tf, pair))
+        if last is not None and last < last_closed_open:
+            out.append(tf)
+    return out
 
 
 def _tmp_dir(pair: str) -> Path:
@@ -49,14 +138,21 @@ def _tmp_dir(pair: str) -> Path:
 
 def _window_slice(pair: str, tf: str, days: int, tag: str) -> Path:
     """Write data/raw/{pair}_{tf}.csv restricted to the last `days` days into
-    the pair's .tmp dir and return the slice's path."""
+    the pair's .tmp dir and return the slice's path.
+
+    Reads only the file's TAIL (shared/csvtail): this runs every 5 minutes per
+    pair, and parsing a whole 5m history (~950k rows for BTC) to keep its last
+    ~13k was the worker's largest avoidable memory and CPU cost."""
     src = paths.raw_csv(tf, pair)
-    df = pd.read_csv(src)
-    cutoff = int(df["timestamp"].max()) - days * DAY_MS
+    last = csvtail.last_ts_ms(src)
+    if last is None:
+        raise RuntimeError(f"{src.name}: no candle rows to slice")
+    cutoff = last - days * DAY_MS
+    est_rows = int(days * DAY_MS // TF_MS[tf]) + 16
+    df = csvtail.read_tail(src, rows=est_rows, since_ms=cutoff)
     df = df[df["timestamp"] >= cutoff]
     dst = _tmp_dir(pair) / f"{pair}_{tf}_{tag}.csv"
     df.to_csv(dst, index=False)
-    n = len(df)
     del df
     gc.collect()
     return dst

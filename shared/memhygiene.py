@@ -32,12 +32,21 @@ _REPORTED = False
 
 
 def peak_rss_mb():
-    """Best-effort PEAK resident-set size in MB (psutil -> Windows ctypes ->
-    None). Peak, not current, so it reflects the worst moment of the run."""
+    """Best-effort PEAK resident-set size in MB (psutil -> POSIX getrusage ->
+    Windows ctypes -> None). Peak, not current, so it reflects the worst
+    moment of the run."""
     try:
         import psutil
         mi = psutil.Process().memory_info()
         return getattr(mi, "peak_wset", mi.rss) / 1e6     # peak_wset on Windows
+    except Exception:
+        pass
+    try:
+        # POSIX stdlib path — the service image has no psutil, and without
+        # this the worker (Linux container) could not report its memory.
+        import resource
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return peak / 1e6 if sys.platform == "darwin" else peak / 1e3   # bytes vs KB
     except Exception:
         pass
     try:

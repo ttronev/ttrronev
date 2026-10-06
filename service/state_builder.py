@@ -38,6 +38,7 @@ from detectors import paths
 from service.ioutil import atomic_write_json
 from service.pairs import WORKER_TFS, MEMORY_TFS, TF_MS
 from shared.atr import compute_atr
+from shared.csvtail import read_tail
 from shared.pricefmt import round_price
 
 TREND_TFS = ["1d", "4h"]
@@ -65,7 +66,9 @@ def _ema_1h_state(state, tf: str) -> str | None:
     fast, slow = cfg.get("ema_fast"), cfg.get("ema_slow")
     if not fast or not slow:
         return None
-    closes = pd.read_csv(paths.raw_csv("1h", state.pair), usecols=["close"])["close"]
+    # Tail read: the EMA below is computed on the last slow*10 closes only.
+    closes = read_tail(paths.raw_csv("1h", state.pair), rows=slow * 10,
+                       columns=["close"])["close"]
     if len(closes) < slow * 3:
         return None
     tail = closes.tail(slow * 10)
@@ -163,8 +166,8 @@ def _zone_tol_pct(pair: str, log=None) -> float:
     read, separate from the close-only _ema_1h_state read. Falls back to 0.35%
     (+ warn) when the 1h CSV has < 20 bars or ATR is NaN."""
     try:
-        df = pd.read_csv(paths.raw_csv("1h", pair),
-                         usecols=["high", "low", "close"]).tail(200)
+        df = read_tail(paths.raw_csv("1h", pair), rows=200,
+                       columns=["high", "low", "close"]).tail(200)
         if len(df) < 20:
             raise ValueError(f"only {len(df)} 1h bars")
         atr_last = float(compute_atr(df, 14)[-1])

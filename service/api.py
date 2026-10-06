@@ -321,12 +321,16 @@ def api_health():
     # detects a dead worker even when NO pair is ready yet (first
     # bootstrap, all-error registry) — a vacuous per-pair pass is not ok.
     worker_alive = False
+    worker_phase = None
     try:
         whb = _read_cached(paths.worker_heartbeat_json()) or {}
         from datetime import datetime
         ts = whb.get("updated_at")
         if ts:
             worker_alive = (now - datetime.fromisoformat(ts).timestamp()) < STALE_AFTER_S
+        # "startup" = alive and catching pairs up after a (re)start; "running"
+        # = in the bar-close loops. Lets a watchdog tell a restart from a hang.
+        worker_phase = whb.get("phase") if worker_alive else None
     except Exception:
         worker_alive = False
     ok = worker_alive
@@ -351,7 +355,7 @@ def api_health():
             "regen_5m_age_s": round(age_s) if age_s is not None else None,
             "stale": stale,
         }
-    body = {"ok": ok, "worker_alive": worker_alive,
+    body = {"ok": ok, "worker_alive": worker_alive, "worker_phase": worker_phase,
             "stale_after_s": STALE_AFTER_S, "pairs": pairs_out}
     return JSONResponse(status_code=200 if ok else 503, content=body)
 
