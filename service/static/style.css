@@ -87,6 +87,10 @@ select, input, textarea {
   margin-left: 16px; margin-right: 16px;
 }
 @media (min-width: 1312px) { .stale-banner { margin-left: auto; margin-right: auto; } }
+/* Same banner slot, but "catching up after a (re)start" is information, not an alarm. */
+.stale-banner.info {
+  background: rgba(250, 178, 25, 0.12); color: var(--near); border-color: var(--near);
+}
 
 /* ----------------------------------------------------------------- chart */
 .chart-panel {

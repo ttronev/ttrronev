@@ -247,6 +247,20 @@ def test_failed_fetch_is_reported_and_not_stamped_as_fresh(wk):
     assert "5m" not in _stamped() and "1h" in _stamped()
 
 
+def test_a_pair_joins_the_cycles_as_soon_as_its_own_startup_is_done(wk, monkeypatch):
+    """The loops run from process start but only serve started pairs — so
+    the first pair finished is kept fresh while the others are still
+    catching up, instead of going stale behind a 20-minute startup."""
+    w, calls, _ = wk
+    monkeypatch.setattr(worker_mod.registry, "ready_pairs", lambda: [PAIR, "LATER_USDT"])
+    assert w._ready_pairs() == [PAIR, "LATER_USDT"]     # live price: everyone
+    assert w._my_pairs() == []                          # cycles: nobody yet
+    _fake_artifacts()
+    w._startup_sync(PAIR)
+    assert w._my_pairs() == [PAIR]                      # first pair joins alone
+    assert "LATER_USDT" not in w.started
+
+
 # ---------------------------------------------------------- structural cycle
 def test_structural_cycle_catches_up_a_timeframe_that_is_behind(wk, monkeypatch):
     w, calls, fetched = wk

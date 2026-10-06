@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import signal
 import sys
 import time
 import traceback
@@ -112,6 +113,13 @@ class Worker:
         self.fail_streak: dict[str, int] = {}           # pair -> consecutive failed 5m passes
         self.phase = "startup"                          # -> "running" once startup regen is done
         self.started_at = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
+        # Pairs whose startup (or bootstrap) has completed. The bar-close loops
+        # run from process start but only touch these, so a pair joins the
+        # 5m/hourly cycles the moment it is current instead of waiting for
+        # every other pair: with weeks of candles to fetch, a 19-pair startup
+        # exceeded the 15-min staleness window and the first pairs went
+        # "stale" while the last were still starting.
+        self.started: set[str] = set()
 
     # ------------------------------------------------------------- errors
     def report_error(self, key: str, exc: BaseException) -> None:
@@ -276,6 +284,7 @@ class Worker:
             await loop.run_in_executor(self.regen_pool, _seed_state)
             await loop.run_in_executor(self.regen_pool, self._heartbeat, pair, WORKER_TFS)
             registry.update_entry(pair, status=registry.READY)
+            self.started.add(pair)                   # joins the bar-close cycles
             log(f"[bootstrap] {pair}: READY")
         except Exception as e:
             # Report FIRST — the registry write below can itself fail (full
@@ -388,6 +397,7 @@ class Worker:
         # its old stamp, so health goes stale instead of claiming freshness.
         self._heartbeat(pair, verified)
         regen.write_marker(pair)
+        self.started.add(pair)                       # from here on the loops serve it
         if regen_tfs:
             log(f"[worker] {pair}: startup complete — regenerated {regen_tfs}"
                 + (" (detection code changed)" if force else ""))
@@ -444,10 +454,15 @@ class Worker:
         })
 
     # ------------------------------------------------------------ async loops
-    def _my_pairs(self) -> list[str]:
+    def _ready_pairs(self) -> list[str]:
         """Ready pairs this worker serves (PAIRS_SHARD filtered; default
         0/1 = everything — sharding is prep, not active scaling)."""
         return shard_pairs(registry.ready_pairs())
+
+    def _my_pairs(self) -> list[str]:
+        """Ready pairs whose startup/bootstrap has completed — the set the
+        bar-close cycles and the backfill operate on."""
+        return [p for p in self._ready_pairs() if p in self.started]
 
     async def five_min_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -503,7 +518,7 @@ class Worker:
     async def live_loop(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
-            for pair in self._my_pairs():
+            for pair in self._ready_pairs():         # live price for every ready pair, started or not
                 try:
                     await loop.run_in_executor(self.live_pool, self._live_sync, pair)
                 except Exception as e:
@@ -517,33 +532,76 @@ class Worker:
         log(f"[worker] starting: ready={ready} tfs={WORKER_TFS}"
             + (" [alerts DRY-RUN]" if ALERTS_DRY_RUN else ""))
         loop = asyncio.get_running_loop()
+
+        # Clean shutdown on SIGTERM/SIGINT. Inside the container this process
+        # is PID 1 (or tini's child with `init: true`); a Python process that
+        # ignores SIGTERM makes every `docker stop` wait out the grace period
+        # and end in SIGKILL — exit code 137, which is what every earlier stop
+        # produced. Windows has no add_signal_handler: Ctrl+C arrives as
+        # KeyboardInterrupt in main() instead.
+        stop = asyncio.Event()
+
+        def _on_signal(name):
+            log(f"[worker] {name} received — stopping after the current job")
+            stop.set()
+        for name in ("SIGTERM", "SIGINT"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            try:
+                loop.add_signal_handler(sig, _on_signal, name)
+            except (NotImplementedError, RuntimeError):
+                pass
+
         hb_task = asyncio.create_task(self.heartbeat_loop())   # FIRST: alive during startup
         live_task = asyncio.create_task(self.live_loop())
-        t0 = time.monotonic()
-        for pair in ready:
-            try:
-                await loop.run_in_executor(self.regen_pool, self._startup_sync, pair)
-            except Exception as e:
-                self.report_error(f"{pair}:startup", e)
-        self.phase = "running"
-        log(f"[worker] startup finished for {len(ready)} pair(s) in "
-            f"{time.monotonic() - t0:.0f}s; entering bar-close loops")
-        tasks = [asyncio.create_task(self.five_min_loop()),
+        # The bar-close loops start NOW and serve pairs as each one finishes
+        # its startup (see self.started). The regen executor is single-
+        # threaded, so a 5m cycle for a started pair simply queues behind the
+        # pair currently starting (at most ~a minute) instead of waiting for
+        # the whole universe.
+        loops = [asyncio.create_task(self.five_min_loop()),
                  asyncio.create_task(self.structural_loop()),
                  asyncio.create_task(self.registry_loop())]
+
+        async def _startup_all():
+            t0 = time.monotonic()
+            for pair in ready:
+                if stop.is_set():
+                    return
+                try:
+                    await loop.run_in_executor(self.regen_pool, self._startup_sync, pair)
+                except Exception as e:
+                    self.report_error(f"{pair}:startup", e)
+            self.phase = "running"
+            log(f"[worker] startup finished for {len(ready)} pair(s) in "
+                f"{time.monotonic() - t0:.0f}s")
+
+        startup_task = asyncio.create_task(_startup_all())
+        stop_task = asyncio.create_task(stop.wait())
         try:
-            await asyncio.gather(hb_task, live_task, *tasks)
+            # Runs until a stop signal, or until one of the forever-loops dies
+            # (then re-raise so the container restarts rather than limping on).
+            done, _ = await asyncio.wait([stop_task, hb_task, live_task, *loops],
+                                         return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                if t is not stop_task and t.exception() is not None:
+                    raise t.exception()
         finally:
-            for t in (hb_task, live_task, *tasks):
+            for t in (stop_task, startup_task, hb_task, live_task, *loops):
                 t.cancel()
+            # A regen job already running in the pool finishes (they are
+            # seconds, atomic writes protect the artifacts); queued ones are
+            # dropped. Docker's stop_grace_period bounds the wait.
             self.regen_pool.shutdown(wait=False, cancel_futures=True)
             self.live_pool.shutdown(wait=False, cancel_futures=True)
+            log("[worker] stopped. clean exit.")
 
 
 def main() -> None:
     try:
         asyncio.run(Worker().main())
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:                    # Windows path (no signal handlers)
         log("[worker] stopped (Ctrl+C). clean exit.")
 
 

@@ -22,12 +22,16 @@ services:
       - ./data:/app/data
       - ./detectors/results:/app/detectors/results
     restart: unless-stopped
+    # tini as PID 1: forwards SIGTERM to the worker (which handles it and
+    # exits cleanly) and reaps zombies. Without it a stop waited out the
+    # grace period and ended in SIGKILL (exit 137) every time.
+    init: true
     # Hard ceiling so a runaway cycle is killed and restarted by Docker instead
-    # of starving the host (the worker was once killed by the host instead).
-    # 2g is deliberately generous: the 5m pass log prints the real peak RSS —
-    # tighten this once it has been observed. Override: TTRRONEV_WORKER_MEM.
+    # of starving the host. 2g is deliberately generous: the 5m pass log prints
+    # the real peak RSS (~150 MB observed) — tighten once a VPS has run a day.
+    # Override: TTRRONEV_WORKER_MEM.
     mem_limit: ${TTRRONEV_WORKER_MEM:-2g}
-    stop_grace_period: 30s
+    stop_grace_period: 30s    # bounds a regen job that is mid-flight at stop time
     logging: *default-logging
     # Healthy = the event loop stamped worker_heartbeat.json in the last 2 min.
     # The stamp starts before the startup regen, so a restart is healthy at once.
@@ -53,6 +57,7 @@ services:
       - "127.0.0.1:${TTRRONEV_PORT:-8000}:8000"   # localhost only; Caddy proxies + auths outside
     depends_on: [worker]
     restart: unless-stopped
+    init: true
     mem_limit: ${TTRRONEV_API_MEM:-512m}
     logging: *default-logging
     # /api/pairs, not /api/health: this checks that the API itself answers.

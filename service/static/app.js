@@ -615,15 +615,28 @@ async function refreshHealth() {
     const h = await r.json();
     const mine = (h.pairs || {})[currentPair];
     const age = mine ? mine.regen_5m_age_s : null;
+    const pairs = Object.values(h.pairs || {});
+    const nFresh = pairs.filter(p => !p.stale).length;
+    const starting = h.worker_alive && h.worker_phase === "startup";
     let cls, txt;
     if (age !== null && age !== undefined && age < 300) { cls = "ok"; txt = "● live"; }
     else if (age !== null && age !== undefined && age < 900) { cls = "warn"; txt = "● lag"; }
     else { cls = "bad"; txt = "● stale"; }
+    if (starting && cls === "bad") { cls = "warn"; txt = "● запуск"; }   // catching up, not dead
     dot.className = `health-dot ${cls}`;
     dot.textContent = txt;
     dot.title = age !== null && age !== undefined
       ? `последний 5m-реген: ${Math.round(age / 60)} мин назад` : "нет heartbeat";
-    banner.hidden = cls !== "bad";
+    if (starting && mine && mine.stale) {
+      banner.textContent =
+        `воркер догоняет данные после запуска: ${nFresh}/${pairs.length} пар обновлено`;
+      banner.className = "stale-banner info";
+      banner.hidden = false;
+    } else {
+      banner.textContent = "данные устарели — воркер не обновлял 5m дольше 15 минут";
+      banner.className = "stale-banner";
+      banner.hidden = cls !== "bad";
+    }
   } catch {
     dot.className = "health-dot bad";
     dot.textContent = "● api down";

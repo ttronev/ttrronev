@@ -35,7 +35,14 @@ longer carries the never-read `retrace_high` key.
   succeed is quarantined (`status: error` + one DM) instead of holding
   global health red forever. The 5-minute path reads only CSV tails
   (`shared/csvtail.py`) instead of whole files (BTC 5m: ~950k rows).
-  `/api/health` adds `worker_phase`.
+  `/api/health` adds `worker_phase`. The bar-close loops start at once and
+  serve each pair as soon as its own startup is done (a 19-pair first
+  startup took 21 min; the earliest pairs went "stale" waiting for the
+  last). The worker handles SIGTERM/SIGINT and exits cleanly; containers
+  run under `init: true`. Before, a Python PID 1 ignored SIGTERM, so every
+  `docker stop` waited out the grace period and ended in SIGKILL (exit 137
+  — misread as an out-of-memory kill). Dashboard shows "catching up after
+  start: N/19 pairs" during startup instead of "data stale".
 - **Compose.** Memory limits (`TTRRONEV_WORKER_MEM`, default 2g; api 512m),
   container healthchecks, log rotation, `stop_grace_period`. Host port
   default stays 8000; `TTRRONEV_PORT` overrides it. New host watchdog
