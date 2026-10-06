@@ -6,6 +6,58 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed / Changed — Phase 0 hardening (2026-10-06)
+Origin: a full audit of the rules and the runtime (plan "harden ttrronev, then
+make it measure and improve itself"). Detection maths is unchanged; artifacts
+for prices ≥ $0.01 are byte-identical except that the layer-1 `config` block no
+longer carries the never-read `retrace_high` key.
+- **Price scale.** Published prices were `round(x, 6)` and printed with two
+  decimals, which left SHIB (0.000005) with one significant digit and printed
+  "$0.00" in alerts. `shared/pricefmt.round_price` keeps 8 significant digits
+  below $0.01 and is exactly the old rounding above it. Applied to the
+  detector output, range memory, zone centres, the CLI report and the
+  dashboard (`fmtPrice` + the chart's price axis, which defaulted to 2
+  decimals for every pair). Dedup keys use the same rule; the confluence key
+  is 4 significant digits.
+- **2H config.** `config()`/CLI said `min_pending_closes=10` while `run()` —
+  what the service calls — used 6; `replay_validate` builds from `config()`,
+  so the forward-only audit tested a config production never ran. One
+  constant (6) now, and a pinned table of every timeframe's locked
+  parameters (`tests/test_wrappers_config.py`).
+- **Alerts.** An alert is marked fired only when Telegram accepted it; a
+  failed send is retried on the next scan instead of being lost.
+- **Worker.** Heartbeat runs from process start (health no longer reports
+  the worker dead for a whole restart). Startup regenerates only timeframes
+  with new candles, missing/outdated artifacts, or after a detection-code
+  change (source fingerprint in `regen_marker.json`) — a plain restart went
+  from ~15 min to seconds per pair. Hourly cycles catch up timeframes whose
+  CSV is behind the last closed bar. A pair that keeps failing while others
+  succeed is quarantined (`status: error` + one DM) instead of holding
+  global health red forever. The 5-minute path reads only CSV tails
+  (`shared/csvtail.py`) instead of whole files (BTC 5m: ~950k rows).
+  `/api/health` adds `worker_phase`.
+- **Compose.** Memory limits (`TTRRONEV_WORKER_MEM`, default 2g; api 512m),
+  container healthchecks, log rotation, `stop_grace_period`. Host port
+  default stays 8000; `TTRRONEV_PORT` overrides it. New host watchdog
+  `deploy/service_health_check.sh` + `.cron` for THIS service (the old
+  `health_check.sh` watches the paper-trade port).
+- **Isolation.** `detectors/paths.py` honours `TTRRONEV_RESULTS_ROOT` /
+  `TTRRONEV_DATA_ROOT`; a sandboxed run never fetches or regenerates. All
+  artifact writes are atomic (`shared/ioutil.py`, re-exported by
+  `service/ioutil.py`).
+- **Tests + CI.** `pytest` suite on synthetic candles (scale invariance of
+  the core, the level scan and the whole chain; level state machine;
+  strength; alerts; worker restart/catch-up/quarantine decisions; tail
+  reader; sandbox; atomic writes). Two tests pin known gaps on purpose
+  (untested levels score strong; retests of a broken level are invisible)
+  so they can only change deliberately. GitHub Actions runs the suite on
+  the image's Python 3.12 + pinned pandas/numpy.
+- **Governance.** `CLAUDE.md` (analysis only, never read `.env`, heavy runs
+  are the owner's, sandbox rule, locked parameters, stop-for-lock). README
+  trading sections carry a PLANNED — NOT ACTIVE banner.
+- Not in this change (needs sign-off): provisional range ends at the data
+  edge are still published as final (plan item 0.5).
+
 ### Added — ttrronev-service Stage 9a: display zones + event de-noising (2026-08-28)
 - **Display zones** (`service/state_builder.py`): new ADDITIVE `zones` field in
   `state.json` — the same strong+weak levels merged into ATR-normalized bands.

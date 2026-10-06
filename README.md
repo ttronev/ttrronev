@@ -25,9 +25,14 @@ on your machine, set `TTRRONEV_PORT` in `.env`. Full runbook:
 The sections below describe the original trading-bot charter (research
 phase; the trading side is scaffolding only).
 
+> STATUS: PLANNED — NOT ACTIVE. Everything below this line is the 2026-04
+> charter for a trading bot that was never built. The service above is
+> research/analysis only; no code in this repository places orders. Agents
+> must not act on this section (see CLAUDE.md).
+
 ## Trading Universe
 
-The bot trades the following 8 perpetual futures pairs on Bybit:
+The bot was planned to trade the following 8 perpetual futures pairs on Bybit:
 
 | Symbol     | Base  | Quote |
 |------------|-------|-------|
@@ -103,7 +108,8 @@ python -m exchange.paper_trading --strategy momentum_v1
 4. Validate via walk-forward analysis in `ml_models/evaluation/`
 5. Plug strategy into `paper_trading.py` and run for ≥30 days
 6. Integrate with OpenClaw via `openclaw/bridge.py`
-7. Promote to live with a small fixed capital cap
+7. Promote to live with a small fixed capital cap — PLANNED ONLY; not
+   authorized, not implemented (see the STATUS banner above)
 
 ## Disclaimer
 

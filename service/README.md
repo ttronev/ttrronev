@@ -63,7 +63,12 @@ One-time setup:
    pre-OKX-listing history (e.g. BTC's 2017-2019 Binance-era candles,
    which OKX cannot provide) and skips the initial fetch.
 4. Caddy: install `deploy/Caddyfile.example` (hash via `caddy hash-password`).
-5. ufw: allow 22/80/443 only. Port 8000 is already loopback-bound in compose.
+5. ufw: allow 22/80/443 only. Port 8000 is already loopback-bound in compose
+   (override per machine with `TTRRONEV_PORT` in `.env`; keep Caddy in step).
+6. Watchdog: install `deploy/service_health_check.cron` (instructions inside).
+   It checks `/api/health` from the host every 5 min and DMs you on
+   API-down / worker-dead / data-stale, plus a recovery notice — independent
+   of Docker, so it still reports when Docker itself is down.
 
 Deploy / update (every time):
 
@@ -88,16 +93,51 @@ No path edits anywhere — everything resolves through `detectors/paths.py`.
   after a worker regen. Long-horizon structure lives in the full-history
   1d/1w memory. If old intraday levels matter, raise the window in
   `service/pairs.py` and pay the regen cost.
-- **The service and the research scripts share the same artifacts.** A
-  worker regen leaves 1h/2h/4h layer-1 files WINDOWED; the Layer-4 research
-  backtests (`detectors/layer4_signals_*.py`) and `freshness_monitor`'s
-  full-history regen overwrite them back. Whichever ran last wins. The
-  layer4 scripts print a loud coverage warning when they detect truncated
-  inputs; for trustworthy full-history research, re-run the chain yourself
-  first and don't run the worker concurrently.
+- **The service's artifacts are windowed** (1h/2h/4h layer-1 files cover
+  1y/1y/2y). Research needing full history must NOT run against the live
+  folder — until the sandbox roots existed, a research regen and the worker
+  silently overwrote each other. Run research with
+  `TTRRONEV_RESULTS_ROOT=<your folder>` (and `--no-freshness`, or let the
+  sandbox guard skip the fetch): it reads the same candles and writes only
+  there. The layer4 scripts still print a loud coverage warning on truncated
+  inputs.
 - **`range_id`s renumber as a window slides** (the ordinal counts from the
   window's first bar). Alert dedup is therefore keyed on level PRICE, not
   id; treat `range_id` in `state.json` as a display label, not an identity.
+
+## Restarts, limits, failure handling
+
+- **Restart is cheap now.** Startup fetches every timeframe (one cheap HTTP
+  call each when nothing is new) and regenerates ONLY what needs it: new
+  candles, a missing/outdated artifact, or a change in the detection code
+  (a fingerprint of the detector/chain sources, stored per pair in
+  `regen_marker.json`). Deploying a detector change forces exactly one full
+  regen; a plain restart with current data takes seconds per pair.
+- **Health during startup.** The worker heartbeat starts BEFORE the startup
+  regen, so `/api/health` reports `worker_alive: true` and
+  `worker_phase: "startup"` immediately; per-pair `stale` flags clear as pairs
+  catch up. The watchdog stays quiet for up to 45 min of startup.
+- **Catch-up by data.** Each hourly cycle also checks whether any of
+  1h/2h/4h/1d is behind its last closed bar (a close missed while the process
+  was stalled, or a fetch that failed) and fetches it, instead of waiting for
+  that timeframe's next close.
+- **Quarantine.** A pair whose 5m cycle fails ~12 passes in a row WHILE other
+  pairs succeed (delisted instrument, broken CSV) is set to `status: error`
+  with the reason, leaves the cycles, stops holding global health red, and
+  you get one DM. Re-add it from the dashboard to retry. A pass where every
+  pair fails is treated as an exchange/network outage and never quarantines.
+- **Memory.** Containers have `mem_limit`s (worker `TTRRONEV_WORKER_MEM`,
+  default 2g — generous on purpose; api 512m). The 5m pass log prints the
+  worker's peak RSS: tighten the limit once you have seen the real number.
+  The 5-minute path reads only the tail of each CSV (`shared/csvtail.py`).
+- **Logs** rotate (20 MB × 5 per container). Every artifact write is atomic
+  (`shared/ioutil.py`): a kill mid-write leaves the previous complete file.
+- **Sandboxing.** Research, experiments and tests set
+  `TTRRONEV_RESULTS_ROOT` (and `TTRRONEV_DATA_ROOT`) to their own folders;
+  the freshness hook then skips fetch + regen. The live service never shares
+  files with a sandboxed run.
+- **Tests.** `python -m pytest` — fast, offline, synthetic candles; runs in CI
+  on the image's Python/pandas/numpy versions (`.github/workflows/tests.yml`).
 
 ## Operational notes
 
