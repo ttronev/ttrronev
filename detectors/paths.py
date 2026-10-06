@@ -116,3 +116,14 @@ def ensure_results_dir(pair: str = DEFAULT_PAIR) -> Path:
     d = results_dir(pair)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+def worker_log() -> Path:
+    """The worker's own log file (a mirror of its stdout), the only file
+    /api/v1/logs/tail serves."""
+    return results_root() / "worker.log"
+
+
+def stages_json() -> Path:
+    """docs/plan/stages.json: the stage map as data (a repo file, not an
+    artifact; served by /api/v1/build/stages)."""
+    return ROOT / "docs" / "plan" / "stages.json"

@@ -1,6 +1,6 @@
-// Response shapes of /api/v1 (ТЗ-B0 §6). Every response carries `version`
-// and `generated_at`. List endpoints are wrapped in an object so the envelope
-// fields have somewhere to live (to confirm at the Layer 2 lock).
+// Response shapes of /api/v1 (ТЗ-B0 §6; server side: service/api_v1.py).
+// Every response carries `version` and `generated_at`. List endpoints are
+// wrapped in an object so the envelope fields have somewhere to live.
 
 export interface Envelope {
   version: string;
@@ -8,31 +8,47 @@ export interface Envelope {
 }
 
 export interface TfHealth {
+  /** Newest regen stamp for this timeframe across ready pairs. */
   last_regen_ts: string | null;
   age_s: number | null;
+  /** Age of the oldest stamp across ready pairs (the worst pair). */
+  max_age_s: number | null;
+  pairs_stamped: number;
 }
 
+export type HealthStatus = "ok" | "degraded" | "down";
+
 export interface HealthV1 extends Envelope {
-  status: "ok" | "degraded" | "down";
+  status: HealthStatus;
   worker_alive: boolean;
+  worker_phase: string | null;
+  /** false = dev mode: TTRRONEV_API_KEY unset, no auth on /api/v1. */
+  auth_enabled: boolean;
   tfs: Record<string, TfHealth>;
   pairs_ready: number;
+  pairs_total: number;
+  pairs_stale: string[];
   cycle_5m_s: number | null;
   rss_mb: number | null;
+  stale_after_s: number;
+  warn_after_s: number;
 }
 
 export interface PairV1 {
   pair: string;
   status: string;
   tfs_ready: string[];
+  added_ts: string | null;
+  error_reason: string | null;
 }
 
 export interface PairsV1 extends Envelope {
   pairs: PairV1[];
 }
 
-/** state.json as today, unchanged shape (typed loosely until the Desk port). */
+/** The legacy /api/state body, shape unchanged (typed loosely until the Desk port). */
 export interface StateV1 extends Envelope {
+  pair: string;
   state: Record<string, unknown>;
 }
 
@@ -43,16 +59,18 @@ export interface CandlesV1 extends Envelope {
   pair: string;
   tf: string;
   candles: CandleRow[];
+  has_more: boolean;
 }
 
 export interface LogsTailV1 extends Envelope {
   lines: string[];
   file: string;
   size_bytes: number;
+  truncated: boolean;
 }
 
 export interface VersionV1 extends Envelope {
   git_commit: string;
-  built_at: string;
+  built_at: string | null;
   app_version: string;
 }

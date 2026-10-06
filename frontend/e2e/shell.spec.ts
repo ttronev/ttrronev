@@ -46,9 +46,11 @@ test("the sidebar lists the 13 entries in order, Admin group last", async ({ pag
   expect(isLast).toBe(true);
 });
 
-test("the build is in mock mode (fixtures, no service)", async ({ page }) => {
+test("the build is in mock mode (fixtures, no service) and shows the dev-mode banner", async ({ page }) => {
   await page.goto("./");
   await expect(page.getByTestId("mock-mode-pill")).toHaveText("mock mode");
+  // The mock health fixture reports auth_enabled: false, as a dev service does.
+  await expect(page.getByTestId("dev-mode-banner")).toHaveText("dev mode, no auth");
 });
 
 for (const [label, stageId] of Object.entries(PLANNED)) {

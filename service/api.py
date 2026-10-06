@@ -405,3 +405,10 @@ def app_shell(rest: str = ""):
         cache = "public, max-age=31536000, immutable" if rest.startswith("assets/") else "no-cache"
         return FileResponse(asset, headers={"Cache-Control": cache})
     return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+# --- /api/v1 (B0a): the versioned, token-gated API the app shell reads.
+# Imported last on purpose: service.api_v1 imports this module lazily
+# (it reuses the legacy composition for state and candles).
+from service.api_v1 import router as v1_router  # noqa: E402
+
+app.include_router(v1_router)

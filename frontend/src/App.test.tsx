@@ -1,8 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { BUNDLED_STAGES, mockBannerText } from "@/lib/stages";
+
+// The top bar polls /api/v1/health; routing tests do not need a service.
+vi.mock("@/lib/useHealth", () => ({
+  useHealth: () => ({ health: null, error: null, lastOkAt: null }),
+}));
 
 function renderAt(path: string) {
   return render(
