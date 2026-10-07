@@ -21,9 +21,9 @@ function renderAt(path: string) {
 }
 
 describe("routes", () => {
-  it("/ is Desk, a live page without a mock banner", () => {
+  it("/ is Desk (loaded on demand), a live page without a mock banner", async () => {
     renderAt("/");
-    expect(screen.getByTestId("page-title")).toHaveTextContent("Desk");
+    expect(await screen.findByTestId("page-title")).toHaveTextContent("Desk");
     expect(screen.queryByTestId("mock-banner")).toBeNull();
   });
 
