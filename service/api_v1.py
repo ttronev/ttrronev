@@ -121,6 +121,7 @@ class HealthV1(Envelope):
     pairs_ready: int
     pairs_total: int
     pairs_stale: list[str]
+    pair_age_5m_s: dict[str, float | None]   # ready pairs: seconds since their last 5m regen
     cycle_5m_s: float | None      # last 5m pass duration, from the worker heartbeat
     rss_mb: float | None          # worker peak RSS so far, from the worker heartbeat
     stale_after_s: int = STALE_AFTER_S
@@ -137,6 +138,20 @@ class PairV1(BaseModel):
 
 class PairsV1(Envelope):
     pairs: list[PairV1]
+
+
+class AddPairsBody(BaseModel):
+    symbol: str | None = None
+    symbols: list[str] | None = None
+
+
+class AddPairsV1(Envelope):
+    queued: list[str]
+    rejected: list[dict[str, str]]
+
+
+class RemovePairV1(Envelope):
+    removed: str
 
 
 class StateV1(Envelope):
@@ -272,6 +287,7 @@ def health() -> HealthV1:
     oldest: dict[str, float] = {}
     counts: dict[str, int] = {}
     stale: list[str] = []
+    pair_age: dict[str, float | None] = {}
     worst_5m_age: float | None = None
     for pair in ready:
         hb = legacy._read_cached(paths.heartbeat_json(pair))
@@ -287,6 +303,7 @@ def health() -> HealthV1:
             counts[tf] = counts.get(tf, 0) + 1
             if tf == "5m":
                 age_5m = now - ts
+        pair_age[pair] = round(age_5m, 1) if age_5m is not None else None
         if age_5m is None or age_5m > STALE_AFTER_S:
             stale.append(pair)
         elif worst_5m_age is None or age_5m > worst_5m_age:
@@ -322,6 +339,7 @@ def health() -> HealthV1:
         pairs_ready=len(ready),
         pairs_total=len(entries),
         pairs_stale=stale,
+        pair_age_5m_s=pair_age,
         cycle_5m_s=float(cycle) if isinstance(cycle, (int, float)) else None,
         rss_mb=float(rss) if isinstance(rss, (int, float)) else None,
     )
@@ -341,6 +359,21 @@ def pairs() -> PairsV1:
             error_reason=e.get("error_reason") if isinstance(e.get("error_reason"), str) else None,
         ))
     return PairsV1(pairs=out)
+
+
+@router.post("/pairs", response_model=AddPairsV1, status_code=201)
+def add_pairs(body: AddPairsBody) -> AddPairsV1:
+    """Same contract as the legacy POST /api/pairs (single `symbol` or a
+    `symbols` batch; all-rejected is 422/409), wrapped in the envelope."""
+    legacy = _legacy()
+    res = legacy.api_add_pair(legacy.AddPairBody(symbol=body.symbol, symbols=body.symbols))
+    return AddPairsV1(queued=list(res["queued"]), rejected=list(res["rejected"]))
+
+
+@router.delete("/pairs/{pair}", response_model=RemovePairV1)
+def remove_pair(pair: str = PathParam(pattern=PAIR_PATTERN)) -> RemovePairV1:
+    res = _legacy().api_remove_pair(pair)          # 404 for an unknown pair; disk untouched
+    return RemovePairV1(removed=str(res["removed"]))
 
 
 @router.get("/state/{pair}", response_model=StateV1)
@@ -366,6 +399,11 @@ def candles(
 # plain 404. The contract (ТЗ-B0 §7) is 422 for any path-like value.
 @router.get("/state/{rest:path}", include_in_schema=False)
 def state_path_like(rest: str) -> None:
+    raise HTTPException(status_code=422, detail="pair must match BASE_QUOTE; path-like values are rejected")
+
+
+@router.delete("/pairs/{rest:path}", include_in_schema=False)
+def remove_pair_path_like(rest: str) -> None:
     raise HTTPException(status_code=422, detail="pair must match BASE_QUOTE; path-like values are rejected")
 
 

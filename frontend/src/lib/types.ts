@@ -28,6 +28,8 @@ export interface HealthV1 extends Envelope {
   pairs_ready: number;
   pairs_total: number;
   pairs_stale: string[];
+  /** Ready pairs: seconds since their last 5m regen (null = never stamped). */
+  pair_age_5m_s: Record<string, number | null>;
   cycle_5m_s: number | null;
   rss_mb: number | null;
   stale_after_s: number;
@@ -46,7 +48,16 @@ export interface PairsV1 extends Envelope {
   pairs: PairV1[];
 }
 
-/** The legacy /api/state body, shape unchanged (typed loosely until the Desk port). */
+export interface AddPairsV1 extends Envelope {
+  queued: string[];
+  rejected: { symbol: string; reason: string }[];
+}
+
+export interface RemovePairV1 extends Envelope {
+  removed: string;
+}
+
+/** The legacy /api/state body, shape unchanged (typed in src/lib/desk/model.ts). */
 export interface StateV1 extends Envelope {
   pair: string;
   state: Record<string, unknown>;

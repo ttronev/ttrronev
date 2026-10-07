@@ -1,7 +1,16 @@
 // The /api/v1 client. The shell reads ONLY /api/v1/*: never server files,
 // never the un-versioned /api/* routes (those belong to the legacy page).
 // No data processing here: fetch, type, hand over.
-import type { CandlesV1, HealthV1, LogsTailV1, PairsV1, StateV1, VersionV1 } from "@/lib/types";
+import type {
+  AddPairsV1,
+  CandlesV1,
+  HealthV1,
+  LogsTailV1,
+  PairsV1,
+  RemovePairV1,
+  StateV1,
+  VersionV1,
+} from "@/lib/types";
 import type { StagesFile } from "@/lib/stages";
 
 /** Documented default (ТЗ-B0): the local Docker stack. Under the Vite dev
@@ -61,11 +70,14 @@ export function maskToken(token: string | null): string {
 export class ApiError extends Error {
   readonly status: number;
   readonly url: string;
-  constructor(status: number, url: string, message?: string) {
+  /** The response's `detail` field when it had a JSON body. */
+  readonly detail: unknown;
+  constructor(status: number, url: string, message?: string, detail?: unknown) {
     super(message ?? `HTTP ${status} for ${url}`);
     this.name = "ApiError";
     this.status = status;
     this.url = url;
+    this.detail = detail;
   }
 }
 
@@ -74,13 +86,41 @@ export function apiUrl(path: string): string {
   return `${serviceUrl()}/api/v1${p}`;
 }
 
-export async function apiGet<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
-  const url = apiUrl(path);
+function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = apiToken();
   if (token) headers["X-API-Key"] = token;
-  const res = await fetch(url, { headers, signal: init?.signal, credentials: "omit" });
-  if (!res.ok) throw new ApiError(res.status, url);
+  return headers;
+}
+
+async function errorFrom(res: Response, url: string): Promise<ApiError> {
+  let detail: unknown;
+  try {
+    detail = ((await res.json()) as { detail?: unknown }).detail;
+  } catch {
+    /* no JSON body */
+  }
+  return new ApiError(res.status, url, undefined, detail);
+}
+
+export async function apiGet<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
+  const url = apiUrl(path);
+  const res = await fetch(url, { headers: authHeaders(), signal: init?.signal, credentials: "omit" });
+  if (!res.ok) throw await errorFrom(res, url);
+  return (await res.json()) as T;
+}
+
+export async function apiSend<T>(method: "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const url = apiUrl(path);
+  const headers = authHeaders();
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "omit",
+  });
+  if (!res.ok) throw await errorFrom(res, url);
   return (await res.json()) as T;
 }
 
@@ -88,18 +128,32 @@ async function mockModule() {
   return import("@/mock/api");
 }
 
+const enc = encodeURIComponent;
+
 /** Typed endpoints. In mock mode every call resolves from src/mock. */
 export const api = {
-  health: (): Promise<HealthV1> => (MOCK ? mockModule().then((m) => m.health()) : apiGet("/health")),
-  pairs: (): Promise<PairsV1> => (MOCK ? mockModule().then((m) => m.pairs()) : apiGet("/pairs")),
-  state: (pair: string): Promise<StateV1> =>
-    MOCK ? mockModule().then((m) => m.state(pair)) : apiGet(`/state/${encodeURIComponent(pair)}`),
-  candles: (pair: string, tf: string, limit = 500): Promise<CandlesV1> =>
+  health: (signal?: AbortSignal): Promise<HealthV1> =>
+    MOCK ? mockModule().then((m) => m.health()) : apiGet("/health", { signal }),
+  pairs: (signal?: AbortSignal): Promise<PairsV1> =>
+    MOCK ? mockModule().then((m) => m.pairs()) : apiGet("/pairs", { signal }),
+  addPairs: (symbols: string[]): Promise<AddPairsV1> =>
     MOCK
-      ? mockModule().then((m) => m.candles(pair, tf, limit))
-      : apiGet(`/candles/${encodeURIComponent(pair)}/${encodeURIComponent(tf)}?limit=${limit}`),
-  logsTail: (lines = 500): Promise<LogsTailV1> =>
-    MOCK ? mockModule().then((m) => m.logsTail(lines)) : apiGet(`/logs/tail?lines=${lines}`),
-  stages: (): Promise<StagesFile> => (MOCK ? mockModule().then((m) => m.stages()) : apiGet("/build/stages")),
-  version: (): Promise<VersionV1> => (MOCK ? mockModule().then((m) => m.version()) : apiGet("/version")),
+      ? mockModule().then((m) => m.addPairs(symbols))
+      : apiSend("POST", "/pairs", symbols.length === 1 ? { symbol: symbols[0] } : { symbols }),
+  removePair: (pair: string): Promise<RemovePairV1> =>
+    MOCK ? mockModule().then((m) => m.removePair(pair)) : apiSend("DELETE", `/pairs/${enc(pair)}`),
+  state: (pair: string, signal?: AbortSignal): Promise<StateV1> =>
+    MOCK ? mockModule().then((m) => m.state(pair)) : apiGet(`/state/${enc(pair)}`, { signal }),
+  candles: (pair: string, tf: string, limit = 500, before?: number, signal?: AbortSignal): Promise<CandlesV1> =>
+    MOCK
+      ? mockModule().then((m) => m.candles(pair, tf, limit, before))
+      : apiGet(`/candles/${enc(pair)}/${enc(tf)}?limit=${limit}${before !== undefined ? `&before=${before}` : ""}`, {
+          signal,
+        }),
+  logsTail: (lines = 500, signal?: AbortSignal): Promise<LogsTailV1> =>
+    MOCK ? mockModule().then((m) => m.logsTail(lines)) : apiGet(`/logs/tail?lines=${lines}`, { signal }),
+  stages: (signal?: AbortSignal): Promise<StagesFile> =>
+    MOCK ? mockModule().then((m) => m.stages()) : apiGet("/build/stages", { signal }),
+  version: (signal?: AbortSignal): Promise<VersionV1> =>
+    MOCK ? mockModule().then((m) => m.version()) : apiGet("/version", { signal }),
 };

@@ -140,6 +140,24 @@ def test_pairs_lists_the_registry(client):
     assert r["pairs"][0]["tfs_ready"] == TFS
 
 
+def test_add_and_remove_pairs_wrap_the_legacy_contract(client, monkeypatch):
+    monkeypatch.setattr(registry, "validate_symbol_okx", lambda pair: (True, ""))
+    r = client.post("/api/v1/pairs", json={"symbol": "link/usdt"})
+    assert r.status_code == 201, r.text
+    body = api_v1.AddPairsV1.model_validate(r.json())
+    assert body.queued == ["LINK_USDT"] and body.rejected == []
+    assert "LINK_USDT" in [p["pair"] for p in client.get("/api/v1/pairs").json()["pairs"]]
+
+    r = client.post("/api/v1/pairs", json={"symbols": ["link/usdt", "not a symbol!!"]})
+    assert r.status_code == 422                       # all rejected: duplicate + invalid
+    assert client.post("/api/v1/pairs", json={}).status_code == 422
+
+    r = client.delete("/api/v1/pairs/LINK_USDT")
+    assert r.status_code == 200 and r.json()["removed"] == "LINK_USDT"
+    assert client.delete("/api/v1/pairs/LINK_USDT").status_code == 404
+    assert client.delete("/api/v1/pairs/..%2Fx").status_code == 422
+
+
 def test_unknown_pair_is_404(client):
     assert client.get("/api/v1/state/NOPE_USDT").status_code == 404
     assert client.get("/api/v1/candles/NOPE_USDT/1h").status_code == 404
@@ -245,6 +263,7 @@ def test_health_fresh_is_ok(client):
     assert h["cycle_5m_s"] == 4.2 and h["rss_mb"] == 152.0
     assert set(h["tfs"]) == set(TFS)
     assert h["tfs"]["5m"]["pairs_stamped"] == 1 and h["tfs"]["5m"]["age_s"] < 60
+    assert list(h["pair_age_5m_s"]) == [PAIR] and h["pair_age_5m_s"][PAIR] < 60
     assert h["stale_after_s"] == 900 and h["warn_after_s"] == 300
 
 

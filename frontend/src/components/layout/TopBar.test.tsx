@@ -25,6 +25,7 @@ function fakeHealth(over: Partial<HealthV1> = {}): HealthV1 {
     pairs_ready: 0,
     pairs_total: 0,
     pairs_stale: [],
+    pair_age_5m_s: {},
     cycle_5m_s: null,
     rss_mb: null,
     stale_after_s: 900,

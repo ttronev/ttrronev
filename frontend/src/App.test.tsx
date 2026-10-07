@@ -8,6 +8,9 @@ import { BUNDLED_STAGES, mockBannerText } from "@/lib/stages";
 vi.mock("@/lib/useHealth", () => ({
   useHealth: () => ({ health: null, error: null, lastOkAt: null }),
 }));
+// The Desk chart needs a canvas; jsdom has none (the chart is covered by the
+// Playwright smoke test on the mock build).
+vi.mock("@/components/desk/Chart", () => ({ DeskChart: () => <div data-testid="desk-chart" /> }));
 
 function renderAt(path: string) {
   return render(
