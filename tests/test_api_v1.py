@@ -6,18 +6,18 @@ are unaffected; health thresholds match the legacy /api/health.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from detectors import paths  # noqa: E402
-from service import __version__ as APP_VERSION  # noqa: E402
-from service import api as api_mod  # noqa: E402
-from service import api_v1, registry  # noqa: E402
-from shared.ioutil import atomic_write_json  # noqa: E402
+from detectors import paths
+from service import __version__ as APP_VERSION
+from service import api as api_mod
+from service import api_v1, registry
+from shared.ioutil import atomic_write_json
 
 PAIR = "TEST_USDT"
 TFS = ["1w", "1d", "4h", "2h", "1h", "5m"]
@@ -46,7 +46,7 @@ def _iso(dt: datetime) -> str:
 
 
 def _write_worker_heartbeat(age_s: float = 0.0, phase: str = "running") -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     atomic_write_json(paths.worker_heartbeat_json(), {
         "updated_at": _iso(now - timedelta(seconds=age_s)),
         "phase": phase,
@@ -57,7 +57,7 @@ def _write_worker_heartbeat(age_s: float = 0.0, phase: str = "running") -> None:
 
 
 def _write_pair_heartbeat(pair: str, age_5m_s: float = 0.0) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stamps = {tf: _iso(now - timedelta(seconds=30)) for tf in TFS}
     stamps["5m"] = _iso(now - timedelta(seconds=age_5m_s))
     atomic_write_json(paths.heartbeat_json(pair), {"pair": pair, "tfs": stamps, "updated_at": _iso(now)})
@@ -74,7 +74,7 @@ def fx(sandbox, monkeypatch):
     api_mod._cache.clear()
     api_mod._candle_cache.clear()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     paths.results_root().mkdir(parents=True, exist_ok=True)
     paths.data_root().mkdir(parents=True, exist_ok=True)
     registry.save([{

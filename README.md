@@ -13,7 +13,12 @@ cd ttrronev
 docker compose up -d          # seed pair bootstraps its own history (~5 min)
 ```
 
-Dashboard: http://localhost:8000 — add more coins from the UI («+ добавить»).
+App: http://localhost:8000/app (Desk, Health, Logs, Build, Settings; the
+other screens are scaffolds on mock data until their stage). The old
+dashboard stays at http://localhost:8000 until the Desk port is signed off.
+Add coins from the Desk («+ добавить»). Set `TTRRONEV_API_KEY` in `.env` to
+require a token on the app's API; unset = dev mode, no auth (the app says
+so). Runbook for the app: [docs/app_shell.md](docs/app_shell.md).
 Optional: copy `.env.example` → `.env` and add your Telegram creds
 (`TTRRONEV_TG_BOT_TOKEN`, `TTRRONEV_TG_CHAT_ID`) for structural alerts; copy
 `data/raw/` from another machine to keep pre-OKX history. If port 8000 is taken

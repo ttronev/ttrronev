@@ -27,7 +27,7 @@ import logging
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -97,7 +97,7 @@ router = APIRouter(prefix="/api/v1", tags=["v1"], dependencies=[Depends(require_
 
 # ---------------------------------------------------------------- models
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class Envelope(BaseModel):
@@ -213,7 +213,7 @@ def _parse_ts(value: Any) -> float | None:
 
 
 def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat(timespec="seconds")
 
 
 def _tail_lines(path: Path, n: int, size: int) -> tuple[list[str], bool]:
@@ -255,7 +255,7 @@ def git_commit() -> str:
             try:
                 out = subprocess.run(
                     ["git", "rev-parse", "--short", "HEAD"],
-                    cwd=paths.ROOT, capture_output=True, text=True, timeout=5,
+                    cwd=paths.ROOT, capture_output=True, text=True, timeout=5, check=False,
                 )
                 if out.returncode == 0 and out.stdout.strip():
                     _git_commit_cache = out.stdout.strip()

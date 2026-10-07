@@ -1,0 +1,8 @@
+# Static checks for the app-shell API and its tests (CI runs ruff on those
+# files only; the research tree is not linted). Defaults otherwise.
+line-length = 120
+target-version = "py312"
+
+[lint.flake8-bugbear]
+# FastAPI declares parameters through calls in defaults; they are immutable markers.
+extend-immutable-calls = ["fastapi.Path", "fastapi.Query", "fastapi.Header", "fastapi.Depends", "fastapi.Body"]
