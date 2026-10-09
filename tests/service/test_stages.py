@@ -72,6 +72,7 @@ def test_dates_parse_and_top_level_is_newest(stages_file):
 
 
 def test_in_progress_stages_are_what_the_shell_claims(stages_file):
-    # R0 is the stage this branch builds; nothing else is in progress yet.
+    # On main nothing is in progress between stages; a branch that builds a
+    # stage lists that stage here and flips it to done when it merges.
     in_progress = sorted(s["id"] for s in stages_file["stages"] if s["status"] == "in_progress")
-    assert in_progress == ["R0"]
+    assert in_progress == []

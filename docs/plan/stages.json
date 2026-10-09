@@ -5,7 +5,7 @@
   "stages": [
     { "id": "P0", "name": "Baseline: Stage 9a committed, token rotated", "track": "A", "depends_on": [], "status": "done", "evidence_url": "https://github.com/ttronev/ttrronev/commit/dbbc762", "updated": "2026-10-09" },
     { "id": "A0", "name": "Harden & run (0.1–0.9)", "track": "A", "depends_on": ["P0"], "status": "in_review", "evidence_url": null, "updated": "2026-10-09" },
-    { "id": "R0", "name": "Repository reorganization", "track": "B", "depends_on": ["B0"], "status": "in_progress", "evidence_url": null, "updated": "2026-10-09" },
+    { "id": "R0", "name": "Repository reorganization", "track": "B", "depends_on": ["B0"], "status": "done", "evidence_url": null, "updated": "2026-10-09" },
     { "id": "B0", "name": "App shell v0", "track": "B", "depends_on": [], "status": "in_review", "evidence_url": null, "updated": "2026-10-09" },
     { "id": "B0c", "name": "Desk widget board", "track": "B", "depends_on": ["B0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-09" },
     { "id": "A1", "name": "Ledger", "track": "A", "depends_on": ["A0"], "status": "not_started", "evidence_url": null, "updated": "2026-10-09" },
