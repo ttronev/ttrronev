@@ -40,3 +40,7 @@ frontend/playwright-report
 frontend/test-results
 frontend/dist
 frontend/.vite
+# tool caches (mypy's alone was 15 MB in the context)
+.mypy_cache
+.ruff_cache
+.pytest_cache
