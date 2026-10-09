@@ -173,7 +173,7 @@ routes are unchanged and still serve the legacy page at `/`.
 - **Image.** The Dockerfile's node stage builds `frontend/dist`, so
   `docker compose build` needs no local npm; `deploy/deploy.sh` stamps the commit
   and build time into `/api/v1/version`. Rebuild both services after a
-  pull: `docker compose build && docker compose up -d`.
+  pull: `docker compose build; docker compose up -d`.
 - **Health fields.** `cycle_5m_s` and `rss_mb` come from
   `worker_heartbeat.json`, stamped by the worker after each 5m pass; they
   are `null` until a worker built from this code has completed one.

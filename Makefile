@@ -1,4 +1,5 @@
-# ttrronev — every target is one line; paste it into PowerShell when `make` is absent.
+# ttrronev: each recipe line is one command you can paste into PowerShell when `make` is absent.
+# PowerShell 5.1 has no `&&`: run the lines of a target one after the other (or join them with `;`).
 # Production `up` sends real Telegram alerts when .env holds the token; `dev` prints them instead.
 .PHONY: dev dev-ui test build up down logs clean
 
@@ -8,11 +9,13 @@ dev:          ## dev compose stack: bind mounts, API --reload, alerts printed no
 dev-ui:       ## the Vite dev server for the app (proxies /api to the local stack on 8090)
 	npm --prefix frontend run dev
 
-test:         ## pytest (synthetic, offline) + vitest
-	python -m pytest && npm --prefix frontend test
+test:         ## pytest (synthetic, offline), then vitest
+	python -m pytest
+	npm --prefix frontend test
 
 build:        ## frontend typecheck + build, then the service image (its node stage builds the shell again)
-	npm --prefix frontend run build && docker compose build
+	npm --prefix frontend run build
+	docker compose build
 
 up:           ## production stack
 	docker compose up -d

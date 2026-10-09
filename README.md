@@ -9,7 +9,8 @@ No live trading: the bot described in `docs/agent/` is planned, not active
 ## Run
 
 ```bash
-git clone https://github.com/ttronev/ttrronev && cd ttrronev
+git clone https://github.com/ttronev/ttrronev
+cd ttrronev
 docker compose up -d      # builds the image (a node stage builds the app); the seed pair bootstraps in ~5 min
 ```
 

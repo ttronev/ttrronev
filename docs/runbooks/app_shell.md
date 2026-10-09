@@ -16,7 +16,7 @@ cd frontend && npm ci
 
 | Goal | Command | Opens |
 |---|---|---|
-| The stack (service + app) | `docker compose build && docker compose up -d` | http://localhost:8090/app/ (port from `TTRRONEV_PORT`, default 8000) |
+| The stack (service + app) | `docker compose build; docker compose up -d` | http://localhost:8090/app/ (port from `TTRRONEV_PORT`, default 8000) |
 | Dev server against the local Docker stack | `npm run dev` | http://127.0.0.1:5173/app/ |
 | Dev server on fixtures, no service needed | `npm run dev:mock` | http://127.0.0.1:5173/app/ |
 | Production build (served by FastAPI) | `npm run build` → `frontend/dist` | http://localhost:8090/app/ |
@@ -130,8 +130,10 @@ stamp `/api/v1/version` (`deploy/deploy.sh` passes them; a plain
 `docker compose build` reports "unknown"). After a pull:
 
 ```bash
-docker compose build && docker compose up -d
+docker compose build; docker compose up -d
 ```
+
+PowerShell 5.1 does not understand `&&`; the `;` form above runs there too, or paste the two commands one after the other.
 
 ## Known limits
 
