@@ -1,0 +1,4 @@
+{
+  "source": "ТЗ-B0 stage map (every stage id the document names). tests/test_stages.py checks that docs/plan/stages.json carries exactly this set.",
+  "ids": ["A0", "A2", "B0", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B11", "B12", "B13"]
+}

@@ -6,6 +6,39 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — B0a app shell (2026-10-07)
+The desktop/web app, structure first (ТЗ-B0): `frontend/` (React + Vite +
+TypeScript + Tailwind + shadcn/ui), built into the service image by a node
+stage and served by FastAPI at `/app`. A thin client over the new versioned
+API only.
+- **Shell.** Sidebar with the 13 entries in the contract order (Admin group
+  last), router with deep links, system theme, error boundaries. Pages whose
+  data arrives later render their real layout on mock data under the banner
+  `Mock data — real data arrives in stage Bx — status: <from stages.json>`.
+  `docs/plan/stages.json` is the stage map as data (schema + committed id
+  list, validated in CI).
+- **`/api/v1`** (`service/api_v1.py`): health, pairs (+ POST/DELETE wrapping
+  the registry), state, candles, logs/tail (clamped to 2000 lines, serves
+  `worker.log` only, no other parameter), build/stages, version. Every
+  response carries `version` + `generated_at`; path-like values are 422.
+  `X-API-Key` vs `TTRRONEV_API_KEY`; unset = dev mode with a persistent
+  "dev mode, no auth" banner in the app. The legacy `/api/*` routes and the
+  page at `/` are untouched. The worker mirrors its stdout into
+  `worker.log` (opt-in, only the worker process) and stamps the last 5m
+  cycle duration and peak RSS into its heartbeat.
+- **Desk** = the dashboard ported (Lightweight Charts 4.2.0 unchanged, same
+  zones/ranges/markers/toggles/labels); parity checked on live data: the
+  same 13 zones and table rows as the old page. **Health, Logs, Build,
+  Settings** live; every polled page shows last-updated and a "service
+  unreachable" banner with the last fetch time while it keeps retrying.
+- **Build + CI.** Multi-stage Dockerfile (node stage builds `frontend/dist`;
+  build args stamp git commit / build time into `/api/v1/version`;
+  `deploy.sh` passes them). CI runs pytest + ruff/mypy on the API, the
+  frontend typecheck/build/vitest/Playwright smoke, and a docker build.
+- Deferred to B0b and later: the pywebview window, `%LOCALAPPDATA%`
+  settings, PyInstaller spec, `app-build.yml`; the removal of the legacy
+  page (its own commit once the owner signs off Desk parity).
+
 ### Fixed / Changed — Phase 0 hardening (2026-10-06)
 Origin: a full audit of the rules and the runtime (plan "harden ttrronev, then
 make it measure and improve itself"). Detection maths is unchanged; artifacts

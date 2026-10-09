@@ -2,6 +2,10 @@
 # service image runs (python:3.12-slim + requirements-service.txt), so a green
 # run here means the container behaves the same. No candles, no network, no
 # secrets are involved — tests use synthetic data in a temp sandbox.
+#
+# Since B0a the app shell has its own job (typecheck, build, vitest,
+# Playwright smoke on the mock build) and the image job proves the
+# multi-stage Dockerfile builds the shell into the service image.
 name: tests
 
 on:
@@ -32,6 +36,11 @@ jobs:
       - name: Unit tests (synthetic, offline)
         run: python -m pytest
 
+      - name: Static checks on the app-shell API (ruff, mypy)
+        run: |
+          ruff check service/api_v1.py tests/test_api_v1.py tests/test_app_shell.py tests/test_stages.py tests/test_worker_log.py
+          mypy service/api_v1.py
+
       - name: Dashboard JS parses
         run: node --check service/static/app.js
 
@@ -40,3 +49,59 @@ jobs:
 
       - name: Watchdog script parses
         run: bash -n deploy/service_health_check.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck + production build
+        run: npm run build
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke test on the mock build (Playwright)
+        run: npm run test:e2e
+
+      - name: Keep the report when the smoke test fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the service image (node stage builds the app shell)
+        run: |
+          docker build \
+            --build-arg GIT_COMMIT="${GITHUB_SHA::7}" \
+            --build-arg BUILT_AT="$(date -u +%FT%TZ)" \
+            -t ttrronev:ci .
+
+      - name: The image carries the shell and imports the API
+        run: |
+          docker run --rm ttrronev:ci test -f frontend/dist/index.html
+          docker run --rm ttrronev:ci python -c "import service.api, service.api_v1; print('api ok')"

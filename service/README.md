@@ -152,3 +152,28 @@ No path edits anywhere — everything resolves through `detectors/paths.py`.
 - Worker errors are logged + sent to Telegram, rate-limited to one DM per
   error key per hour; the loop never dies.
 - `/api/health` returns 503 when the freshest 5m regen is older than 15 min.
+
+## App shell API (`/api/v1`)
+
+The React app (`frontend/`, served at `/app`) reads only `/api/v1/*`
+(`service/api_v1.py`). Every response carries `version` and `generated_at`.
+Routes: `health`, `pairs`, `state/{pair}`, `candles/{pair}/{tf}?limit`,
+`logs/tail?lines` (clamped to 2000; serves `worker.log` only, no other
+parameter accepted), `build/stages`, `version`. The un-versioned `/api/*`
+routes are unchanged and still serve the legacy page at `/`.
+
+- **Auth.** Set `TTRRONEV_API_KEY` in `.env`; every `/api/v1` request must
+  then carry `X-API-Key` (401 otherwise). Unset = dev mode: auth off and
+  `/api/v1/health` reports `auth_enabled: false`, which the app shows as a
+  persistent "dev mode, no auth" banner. The key is never logged.
+- **Worker log.** The worker mirrors its stdout into
+  `detectors/results/worker.log` (one rotation to `.1` past 20 MB); that
+  file is what `/api/v1/logs/tail` serves. `docker compose logs` is
+  unchanged.
+- **Image.** The Dockerfile's node stage builds `frontend/dist`, so
+  `docker compose build` needs no local npm; `deploy.sh` stamps the commit
+  and build time into `/api/v1/version`. Rebuild both services after a
+  pull: `docker compose build && docker compose up -d`.
+- **Health fields.** `cycle_5m_s` and `rss_mb` come from
+  `worker_heartbeat.json`, stamped by the worker after each 5m pass; they
+  are `null` until a worker built from this code has completed one.

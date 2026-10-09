@@ -40,6 +40,14 @@ repo could place trades, leak credentials, or quietly corrupt the live service.
 8. **Report honestly.** If a test fails, say so with the output. If a step was
    skipped or could not be verified here, say that. Never describe a result
    you did not observe.
+9. **The app is a thin client.** The desktop/web app lives under `frontend/`
+   (React + Vite + TypeScript + Tailwind + shadcn/ui, built to
+   `frontend/dist`, served by FastAPI at `/app`). It reads only `/api/v1/*`:
+   never server files, never the un-versioned `/api/*` routes, no data
+   processing in the app, no secrets in the repo or the bundle, tokens
+   masked everywhere. This supersedes Stage 9 ground rule 7 ("vanilla JS, no
+   build step"): `service/static/` is the legacy page, frozen until Desk
+   parity is verified and it is removed in its own commit.
 
 ## What agents may do without asking
 
@@ -64,6 +72,11 @@ repo could place trades, leak credentials, or quietly corrupt the live service.
   `alerts.py` (Telegram), `paths.py` (every artifact path, sandbox-aware).
 - `service/` — 24/7 worker (`worker.py`, `regen.py`), FastAPI dashboard
   (`api.py`, `static/`), `state_builder.py` (levels → zones).
+- `frontend/` — the app shell (B0a): `src/lib/nav.ts` (the 13 sidebar
+  entries, as data), `src/lib/api.ts` (the `/api/v1` client), `src/mock/*`
+  (fixtures behind `--mode mock`), `src/components/ui` (shadcn/ui),
+  `e2e/` (Playwright smoke). `docs/plan/stages.json` is the stage map as
+  data; update it in the commit that changes a stage's status.
 - `shared/` — pure helpers: `pricefmt` (scale-safe prices), `csvtail`
   (tail-only CSV reads), `ioutil` (atomic writes), `atr`, `memhygiene`.
 - `tests/` — fast offline suite on synthetic candles; `tests/synth.py` makes

@@ -1,3 +1,7 @@
 # Test tooling only. The service image installs requirements-service.txt and
 # nothing from this file. CI installs both (see .github/workflows/tests.yml).
 pytest==9.1.1
+httpx==0.28.1        # fastapi.testclient (tests/test_app_shell.py, tests/test_api_v1.py)
+jsonschema==4.26.0   # docs/plan/stages.json validation (tests/test_stages.py)
+ruff==0.16.10        # static checks on service/api_v1.py (CI)
+mypy==2.4.0

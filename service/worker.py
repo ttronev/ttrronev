@@ -87,9 +87,38 @@ STRUCTURAL_TFS = [tf for tf in WORKER_TFS if tf != "5m"]
 ALERTS_DRY_RUN = os.environ.get("TTRRONEV_ALERTS_DRY_RUN", "") in ("1", "true", "yes")
 
 
+LOG_FILE_MAX_BYTES = 20 * 1024 * 1024   # then rotate once to worker.log.1
+# Opt-in: only the worker process (main()) mirrors its log into worker.log.
+# Importing this module or calling log() from tests and tools must never
+# write into the live results folder (CLAUDE.md rule 4).
+LOG_FILE_ENABLED = False
+
+
 def log(msg: str) -> None:
     ts = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
-    print(f"{ts} {msg}", flush=True)
+    line = f"{ts} {msg}"
+    print(line, flush=True)
+    _append_log_file(line)
+
+
+def _append_log_file(line: str) -> None:
+    """Mirror of stdout into worker.log (detectors/paths.worker_log) so
+    /api/v1/logs/tail can serve it. Best effort: logging must never kill
+    the worker. One rotation to worker.log.1 past LOG_FILE_MAX_BYTES."""
+    if not LOG_FILE_ENABLED:
+        return
+    try:
+        p = paths.worker_log()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if p.stat().st_size > LOG_FILE_MAX_BYTES:
+                os.replace(p, p.with_name(p.name + ".1"))
+        except OSError:
+            pass
+        with p.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def _due_structural_tfs(boundary_ms: int) -> list[str]:
@@ -112,6 +141,8 @@ class Worker:
         self.alert_fired: dict[str, dict] = {}          # pair -> dedup map
         self.fail_streak: dict[str, int] = {}           # pair -> consecutive failed 5m passes
         self.phase = "startup"                          # -> "running" once startup regen is done
+        self.last_cycle_5m_s: float | None = None       # /api/v1/health: last 5m pass duration
+        self.rss_mb: float | None = None                # /api/v1/health: peak RSS so far
         self.started_at = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
         # Pairs whose startup (or bootstrap) has completed. The bar-close loops
         # run from process start but only touch these, so a pair joins the
@@ -329,6 +360,8 @@ class Worker:
                     "updated_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"),
                     "phase": self.phase,
                     "started_at": self.started_at,
+                    "last_cycle_5m_s": self.last_cycle_5m_s,
+                    "rss_mb": self.rss_mb,
                 })
             except Exception as e:
                 self.report_error("worker-heartbeat", e)
@@ -489,6 +522,8 @@ class Worker:
                 total = time.monotonic() - t0
                 breakdown = ", ".join(f"{p}: {d:.1f}s" for p, d in per_pair)
                 rss = peak_rss_mb()
+                self.last_cycle_5m_s = round(total, 1)
+                self.rss_mb = round(rss, 1) if rss is not None else None
                 log(f"[worker] 5m pass: total {total:.1f}s over "
                     f"{len(per_pair)} pair(s)"
                     + (f", peak RSS {rss:.0f} MB" if rss is not None else "")
@@ -599,6 +634,8 @@ class Worker:
 
 
 def main() -> None:
+    global LOG_FILE_ENABLED
+    LOG_FILE_ENABLED = True              # only the worker process mirrors its log to worker.log
     try:
         asyncio.run(Worker().main())
     except KeyboardInterrupt:                    # Windows path (no signal handlers)
