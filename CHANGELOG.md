@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — R0 repository reorganization (2026-10-09)
+Moves only, no behaviour change: `research/backtesting/` (was
+`backtesting/`); `archive/` (paper_trade, ml_models, openclaw, strategies,
+the old exchange stubs, the archived `requirements.txt`, the paper-trade
+watchdog and unit); `docs/runbooks/` (service, memory_hygiene,
+validation_status, app_shell, deploy), `docs/decisions/`, `docs/agent/`
+(memory.md, personality.md); `deploy/deploy.sh`; tests mirrored by package
+(`tests/detectors`, `tests/service`, `tests/shared`, `tests/exchange`);
+`exchange/` recreated as an empty package for B1. `detectors/` untouched:
+`scripts/detectors_manifest.sha256` pins every file's SHA-256 and
+`scripts/check_layout.py` verifies it (and the moves) in CI. The four
+parity/trade logs left the tree (history keeps them). README is the map plus
+the quickstart; a Makefile covers dev / test / build / up / down / logs /
+clean; `docs/plan/stages.json` lists all 23 stages of the master plan.
+
 ### Added — B0a app shell (2026-10-07)
 The desktop/web app, structure first (ТЗ-B0): `frontend/` (React + Vite +
 TypeScript + Tailwind + shadcn/ui), built into the service image by a node

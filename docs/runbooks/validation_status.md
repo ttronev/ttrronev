@@ -63,3 +63,13 @@ User-verified: query_state 89MB, compute_known_at 107MB, range_detector_1d 135MB
 .venv\Scripts\python.exe -m detectors.replay_validate --tf 1d --mode full --start 2024-04-01 --end 2024-11-30   # ambiguous-break (R024)
 .venv\Scripts\python.exe -m detectors.replay_validate --tf 4h --mode anchored --start 2025-06-01 --end 2026-06-01
 ```
+
+## Known paths
+
+Three frozen scripts in `detectors/` — `layer4_signals_range_to_range.py`,
+`layer4_signals_retest_fail.py` and `replay_validate.py` — write their output
+under `backtesting/results/` at the repository root, the pre-R0 location. They
+are owner-run research passes and the protected core is not edited for a path,
+so the root path stays gitignored (and excluded from the image) until the
+detector is next changed through the A3 gate. Move their output into
+`research/backtesting/results/` by hand.

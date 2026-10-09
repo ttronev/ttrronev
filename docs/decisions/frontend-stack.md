@@ -1,0 +1,1 @@
+2026-10-06 — Frontend stack. React + Vite + TypeScript + Tailwind with shadcn/ui under frontend/, built to dist/ by the image's node stage and served by FastAPI; Lightweight Charts kept for charts. The design pass (B0b) is done in Claude Design from the public repo; its handoff bundle is applied by Claude Code.
