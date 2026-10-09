@@ -6,6 +6,8 @@
 # Since B0a the app shell has its own job (typecheck, build, vitest,
 # Playwright smoke on the mock build) and the image job proves the
 # multi-stage Dockerfile builds the shell into the service image.
+# Since R0 the layout guard (scripts/check_layout.py) fails the build if any
+# byte under detectors/ changes or a moved tree reappears.
 name: tests
 
 on:
@@ -36,10 +38,13 @@ jobs:
       - name: Unit tests (synthetic, offline)
         run: python -m pytest
 
-      - name: Static checks on the app-shell API (ruff, mypy)
+      - name: Layout guard (detectors/ manifest, R0 moves, no archive imports)
+        run: python scripts/check_layout.py
+
+      - name: Static checks on the app-shell API and exchange/ (ruff, mypy)
         run: |
-          ruff check service/api_v1.py tests/test_api_v1.py tests/test_app_shell.py tests/test_stages.py tests/test_worker_log.py
-          mypy service/api_v1.py
+          ruff check service/api_v1.py exchange tests/service/test_api_v1.py tests/service/test_app_shell.py tests/service/test_stages.py tests/service/test_worker_log.py
+          mypy service/api_v1.py exchange
 
       - name: Dashboard JS parses
         run: node --check service/static/app.js
@@ -48,7 +53,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Watchdog script parses
-        run: bash -n deploy/service_health_check.sh
+        run: bash -n deploy/service_health_check.sh deploy/deploy.sh
 
   frontend:
     runs-on: ubuntu-latest

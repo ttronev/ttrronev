@@ -15,7 +15,7 @@ import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs" / "plan"
 
 
@@ -72,6 +72,6 @@ def test_dates_parse_and_top_level_is_newest(stages_file):
 
 
 def test_in_progress_stages_are_what_the_shell_claims(stages_file):
-    # B0 is the stage this branch builds; nothing else is in progress yet.
+    # R0 is the stage this branch builds; nothing else is in progress yet.
     in_progress = sorted(s["id"] for s in stages_file["stages"] if s["status"] == "in_progress")
-    assert in_progress == ["B0"]
+    assert in_progress == ["R0"]

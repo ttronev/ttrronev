@@ -1,0 +1,1 @@
+2026-10-05 — Execution venue. Hyperliquid and its API; Bybit dropped. OKX remains the deep-history source for the detector. Paper trading first, on Hyperliquid testnet, through an API agent wallet that can trade but never withdraw.

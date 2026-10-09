@@ -21,7 +21,6 @@ venv/
 /logs/
 /data/raw/
 /data/processed/
-/ml_models/models/
 
 # Keep folder structure for the gitignored runtime dirs
 !/logs/.gitkeep
@@ -29,17 +28,20 @@ venv/
 !/logs/errors/README.md
 !/data/raw/README.md
 !/data/processed/README.md
-!/ml_models/models/README.md
 
-# Backtest outputs
+# Backtest outputs. The root path stays: three frozen scripts in detectors/
+# still write there (docs/runbooks/validation_status.md, "Known paths").
 /backtesting/results/
+/research/backtesting/results/
 
 # Detector / service artifacts (live on the docker volume, not in git)
 /detectors/results/
 
-# Paper-trade runtime state (sqlite DBs, session logs)
-/paper_trade/data/
-/paper_trade/logs/
+# Archived runtime state (paper-trade sqlite DBs and session logs, ML model
+# dumps); nothing under these paths is tracked
+/archive/paper_trade/data/
+/archive/paper_trade/logs/
+/archive/ml_models/models/
 
 # Claude Code local settings (machine-specific)
 /.claude/

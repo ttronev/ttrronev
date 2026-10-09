@@ -281,7 +281,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import sys                                    # Memory hygiene: see MEMORY_HYGIENE.md
+    import sys                                    # Memory hygiene: see docs/runbooks/memory_hygiene.md
     from pathlib import Path as _P
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
     from shared.memhygiene import install

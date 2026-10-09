@@ -5,7 +5,7 @@
 # no local npm. Build args stamp /api/v1/version:
 #   docker build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
 #                --build-arg BUILT_AT=$(date -u +%FT%TZ) .
-# (deploy.sh passes them; a plain `docker compose build` reports "unknown".)
+# (deploy/deploy.sh passes them; a plain `docker compose build` reports "unknown".)
 
 # --- stage 1: app shell ----------------------------------------------------
 FROM node:24-alpine AS frontend

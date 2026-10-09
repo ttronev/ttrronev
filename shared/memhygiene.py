@@ -1,5 +1,5 @@
 """
-shared/memhygiene.py — shared memory-hygiene helpers. See MEMORY_HYGIENE.md.
+shared/memhygiene.py — shared memory-hygiene helpers. See docs/runbooks/memory_hygiene.md.
 
 Every locally-run script imports `finalize` and calls it at the very end of its
 __main__ block (or registers `install` near the start). This guarantees the

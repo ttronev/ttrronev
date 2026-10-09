@@ -126,7 +126,7 @@ build of the image.
 
 The Dockerfile's node stage builds `frontend/dist` and the Python stage
 copies it in; no npm on the host. Build args `GIT_COMMIT` and `BUILT_AT`
-stamp `/api/v1/version` (`deploy.sh` passes them; a plain
+stamp `/api/v1/version` (`deploy/deploy.sh` passes them; a plain
 `docker compose build` reports "unknown"). After a pull:
 
 ```bash

@@ -5,7 +5,7 @@ network, and NO reads or writes under the live data/raw or detectors/results.
 Anything that touches artifacts uses the `sandbox` fixture, which points the
 path layer at a temp folder via TTRRONEV_RESULTS_ROOT / TTRRONEV_DATA_ROOT
 (see detectors/paths.py). Heavy passes (replays, full-history regens) are not
-tests — see MEMORY_HYGIENE.md.
+tests — see docs/runbooks/memory_hygiene.md.
 """
 import importlib
 import sys

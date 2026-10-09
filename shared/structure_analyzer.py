@@ -35,7 +35,7 @@ or call `analyze(df)` to loop over a DataFrame (backwards-compat).
     states = a.analyze(df)                 # entire df, list[StructureState]
 
 Both paths produce mathematically identical event streams on identical
-input. See `paper_trade/REFACTOR_C1_DESIGN.md` for the proof.
+input. See `archive/paper_trade/REFACTOR_C1_DESIGN.md` for the proof.
 
 Persistence: `serialize() -> dict` and `from_state(d, cfg) -> Analyzer`
 support checkpoint/restore. JSON-safe.

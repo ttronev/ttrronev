@@ -1,7 +1,7 @@
 """
 shared/ioutil.py — atomic JSON writes + tolerant reads.
 
-Memory hygiene: see MEMORY_HYGIENE.md (no buffering beyond one document).
+Memory hygiene: see docs/runbooks/memory_hygiene.md (no buffering beyond one document).
 
 Every JSON artifact — the service's state/live/heartbeat files AND the detector
 chain's layer-1 / range-memory files — is written to a temp file IN THE SAME

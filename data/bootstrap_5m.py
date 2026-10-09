@@ -11,7 +11,7 @@ candles retains ~1-2y of 5m, so expect ~150k+ rows and a few minutes of paging.
 HEAVY — run ONCE (it's yours to run). After this, the 5m CSV is kept current the
 normal way (okx_fetch --extend, once 5m is registered in freshness_monitor).
 
-Memory hygiene: see MEMORY_HYGIENE.md. The full row list for ~150k 5m bars is
+Memory hygiene: see docs/runbooks/memory_hygiene.md. The full row list for ~150k 5m bars is
 ~30-50MB (tuples) + the dedup ts-set — well under the 500MB utility ceiling;
 peak RSS is self-reported on exit.
 
@@ -78,6 +78,6 @@ def main():
 
 
 if __name__ == "__main__":
-    from shared.memhygiene import install        # Memory hygiene: see MEMORY_HYGIENE.md
+    from shared.memhygiene import install        # Memory hygiene: see docs/runbooks/memory_hygiene.md
     install("bootstrap_5m")
     main()

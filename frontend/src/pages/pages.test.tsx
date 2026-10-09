@@ -97,7 +97,9 @@ describe("Build", () => {
     await waitFor(() => expect(screen.getByTestId("last-updated")).toHaveTextContent("live from the service"));
     expect(screen.getAllByTestId("stage-row")).toHaveLength(BUNDLED_STAGES.stages.length);
     const now = within(screen.getByTestId("now-strip")).getAllByTestId("now-stage");
-    expect(now.map((n) => n.textContent)).toEqual(["B0 · App shell v0"]);
+    const inProgress = BUNDLED_STAGES.stages.filter((s) => s.status === "in_progress").map((s) => `${s.id} · ${s.name}`);
+    expect(inProgress.length).toBeGreaterThan(0);
+    expect(now.map((n) => n.textContent)).toEqual(inProgress);
   });
 
   it("falls back to the bundled snapshot when the service is away", async () => {

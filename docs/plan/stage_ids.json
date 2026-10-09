@@ -1,4 +1,4 @@
 {
-  "source": "ТЗ-B0 stage map (every stage id the document names). tests/test_stages.py checks that docs/plan/stages.json carries exactly this set.",
-  "ids": ["A0", "A2", "B0", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B11", "B12", "B13"]
+  "source": "Master plan document, Stage map tab (all 23 stages). tests/service/test_stages.py checks that docs/plan/stages.json carries exactly this set.",
+  "ids": ["P0", "A0", "R0", "B0", "B0c", "A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14"]
 }

@@ -196,7 +196,7 @@ def consumer_startup(end_consumer: bool = False, pair: str = DEFAULT_PAIR):
     regen-on-update so the user never has to remember the 6-step chain.
     REGEN-CHAIN scripts (cleanness/nesting/known_at/layer5/5.1) only refresh the
     CSVs (regen=False) — they ARE the regen, auto-regen would be circular.
-    See MEMORY_HYGIENE.md 'Freshness contract'."""
+    See docs/runbooks/memory_hygiene.md 'Freshness contract'."""
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--no-freshness", action="store_true")
     p.add_argument("--no-regen", action="store_true")
@@ -235,7 +235,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(ROOT))                # Memory hygiene: see MEMORY_HYGIENE.md
+    sys.path.insert(0, str(ROOT))                # Memory hygiene: see docs/runbooks/memory_hygiene.md
     from shared.memhygiene import install
     install("freshness_monitor")
     main()

@@ -56,4 +56,4 @@ A strategy is eligible for live deployment only if **all** of these hold:
 - Max drawdown ≤ 20%
 - ≥30 days of paper trading with realized Sharpe ≥ 0.7
 - No single symbol contributing >40% of total PnL (concentration check)
-- Code reviewed and entry written in `strategies/strategy_log.md`
+- Code reviewed and entry written in `archive/strategies/strategy_log.md`

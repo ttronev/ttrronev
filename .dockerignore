@@ -12,18 +12,20 @@ docker-compose*.yml
 data/raw
 data/processed
 detectors/results
-backtesting/results
 logs
-paper_trade/data
-paper_trade/logs
 *.sqlite
 
-# research-only trees not needed by the service
-ml_models
-avax_parity.log
-link_parity.log
-sol_parity.log
-sol_3rr_trade_log.csv
+# not needed by the service: the archive, research, tests, dev scripts and
+# every doc except docs/plan (the node stage bundles docs/plan/stages.json).
+# `docs/*` then `!docs/plan`: a `docs/` line would not let the plan back in.
+archive
+research
+tests
+scripts
+docs/*
+!docs/plan
+# three frozen scripts in detectors/ still write here (validation_status.md, "Known paths")
+backtesting/results
 
 # junk
 **/__pycache__
@@ -38,3 +40,7 @@ frontend/playwright-report
 frontend/test-results
 frontend/dist
 frontend/.vite
+# tool caches (mypy's alone was 15 MB in the context)
+.mypy_cache
+.ruff_cache
+.pytest_cache

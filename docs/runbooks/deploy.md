@@ -1,0 +1,1 @@
+Deploy files. deploy/deploy.sh builds the image with the git commit stamped and restarts the stack; deploy/Caddyfile.example is the reverse proxy; deploy/service_health_check.sh + .cron is the host watchdog (/api/health). Procedure: docs/runbooks/service.md, section Prod. Secrets: only .env.example is in git; .env lives on the host.

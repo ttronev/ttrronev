@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backtesting.secondary_only_engine import SecondaryOnlyEngine, SecondaryRow
+from research.backtesting.secondary_only_engine import SecondaryOnlyEngine, SecondaryRow
 
 __all__ = ["SecondaryOnlyEngineExp", "SecondaryRow"]
 
