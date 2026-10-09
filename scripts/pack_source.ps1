@@ -3,7 +3,7 @@
 # Build ttrronev_src.zip from the working tree for SHARING SOURCE without the
 # ~900 MB of runtime state and without any credentials. Excludes:
 #   .git\ .venv\ data\ logs\ __pycache__\ detectors\results\
-#   backtesting\results\ paper_trade\data\ paper_trade\logs\  and  .env / .env.*
+#   research\backtesting\results\ archive\paper_trade\data\ archive\paper_trade\logs\  and  .env / .env.*
 # .env.example (placeholders only) IS kept so a recipient has the env template.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\pack_source.ps1
@@ -17,8 +17,8 @@ $zip  = Join-Path $root "ttrronev_src.zip"
 # .venv/.git/data trees are never even enumerated.
 $topSkip = @(".git", ".venv", "data", "logs")
 # Nested path fragments excluded anywhere below a kept top-level dir.
-$nestedSkip = @("\__pycache__\", "\detectors\results\", "\backtesting\results\",
-                "\paper_trade\data\", "\paper_trade\logs\")
+$nestedSkip = @("\__pycache__\", "\detectors\results\", "\research\backtesting\results\",
+                "\archive\paper_trade\data\", "\archive\paper_trade\logs\")
 
 Push-Location $root
 try {

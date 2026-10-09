@@ -1,7 +1,7 @@
 # ttrronev — Persistent Memory
 
 This file is the bot's long-term memory. It survives restarts and is synced with
-OpenClaw via `openclaw/memory_sync.md`. Anything written here should be:
+OpenClaw via `archive/openclaw/memory_sync.md`. Anything written here should be:
 
 - **Durable** — still relevant across sessions / market regimes
 - **Specific** — concrete facts, numbers, dates; not vague impressions

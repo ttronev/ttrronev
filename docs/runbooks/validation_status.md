@@ -1,4 +1,4 @@
-# VALIDATION_STATUS.md — what has been validated, and how
+# validation_status.md — what has been validated, and how
 
 Records the trustworthiness of the detection + signal foundation, so future
 work isn't re-litigated. Updated 2026-06-02.
@@ -51,14 +51,14 @@ Details in the `layer4-research-findings` memory.
 
 ## Memory hygiene — VALIDATED ✅
 
-All active scripts self-report peak RSS and exit clean (see `MEMORY_HYGIENE.md`).
+All active scripts self-report peak RSS and exit clean (see `memory_hygiene.md`).
 User-verified: query_state 89MB, compute_known_at 107MB, range_detector_1d 135MB;
 `python.exe` releases within 5s of prompt return.
 
 ## How to re-validate (commands are the user's to run)
 
 ```powershell
-# Forward-only replay audits (per MEMORY_HYGIENE.md: user runs replay passes)
+# Forward-only replay audits (per memory_hygiene.md: user runs replay passes)
 .venv\Scripts\python.exe -m detectors.replay_validate --tf 1w 1d                 # full per-bar
 .venv\Scripts\python.exe -m detectors.replay_validate --tf 1d --mode full --start 2024-04-01 --end 2024-11-30   # ambiguous-break (R024)
 .venv\Scripts\python.exe -m detectors.replay_validate --tf 4h --mode anchored --start 2025-06-01 --end 2026-06-01

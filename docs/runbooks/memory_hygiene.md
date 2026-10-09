@@ -1,4 +1,4 @@
-# MEMORY_HYGIENE.md — memory-efficiency contract for all local scripts
+# memory_hygiene.md — memory-efficiency contract for all local scripts
 
 This machine is RAM-constrained. **Memory-efficient by default is a hard ship
 requirement, not a nice-to-have.** A script that can't meet its target gets
@@ -101,7 +101,7 @@ chain in-process, memory-bounded (gc between stages).
 ## Header reference
 
 Every **new** script's header comment must reference this file, e.g.:
-`# Memory hygiene: see MEMORY_HYGIENE.md (targets, teardown via shared/memhygiene.py).`
+`# Memory hygiene: see docs/runbooks/memory_hygiene.md (targets, teardown via shared/memhygiene.py).`
 
 ## Retrofit status (existing scripts)
 
@@ -121,11 +121,11 @@ retrofitted. Future-Claude: do not revive these — the active equivalents exist
   `range_detector_v3.py`, `range_detector_v3_1.py`
 - `detectors/plot_range_detector_v2.py`, `plot_range_detector_v3.py`,
   `plot_range_detector_v3_1.py`
-- `backtesting/run_entry_sweep.py`, `run_hard_stop_sweep.py`,
+- `research/backtesting/run_entry_sweep.py`, `run_hard_stop_sweep.py`,
   `run_secondary_only.py`, `run_symmetric_bos_fib.py`, `analyze_levels.py`,
   `analyze_regimes_and_bands.py`
 - `data/fetch_data.py`, `data/fetch_binance.py` (Binance/ccxt — geo-blocked; OKX now)
 
-Now-orphaned by the above (no remaining runner): `backtesting/secondary_only_engine_v14exp.py`
-— a further deletion candidate if confirmed unused. `backtesting/level_features.py`
-is KEPT (imported by `paper_trade/level_proximity.py`).
+Now-orphaned by the above (no remaining runner): `research/backtesting/secondary_only_engine_v14exp.py`
+— a further deletion candidate if confirmed unused. `research/backtesting/level_features.py`
+is KEPT (imported by `archive/paper_trade/level_proximity.py`).

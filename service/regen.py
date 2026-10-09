@@ -10,7 +10,7 @@ Wraps the EXISTING detector stack without touching its logic:
                  copy of the raw CSV and passing its path into run() — the
                  detector itself is unchanged.
   * chain      — cleanness -> nesting -> known_at -> layer5 -> layer5.1, the
-                 load-bearing order from MEMORY_HYGIENE.md, at most once per
+                 load-bearing order from docs/runbooks/memory_hygiene.md, at most once per
                  CHAIN_MIN_INTERVAL_S (levels only change when a range ends).
 
 Window caveat (by design, per the service spec): a windowed run rebuilds
@@ -323,7 +323,7 @@ def regen_chain(pair: str, log=print) -> float:
     """Re-run the derived chain for the memory TFs, in the load-bearing order.
     MUST follow any detector re-run of a memory TF (the detector wipes the
     cleanness/nesting/known_at fields; a partial chain silently empties the
-    level registry — see MEMORY_HYGIENE.md). Returns duration in seconds."""
+    level registry — see docs/runbooks/memory_hygiene.md). Returns duration in seconds."""
     t0 = time.monotonic()
     import detectors.compute_cleanness as _cc
     import detectors.cascade_nesting as _cn

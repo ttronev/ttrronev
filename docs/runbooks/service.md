@@ -73,14 +73,14 @@ One-time setup:
 Deploy / update (every time):
 
 ```bash
-./deploy.sh
+./deploy/deploy.sh
 ```
 
 (git pull --ff-only → compose build → up -d → ps.)
 
 ## Adding a pair
 
-1. Add the line to `PAIRS` in [service/pairs.py](pairs.py).
+1. Add the line to `PAIRS` in [service/pairs.py](../../service/pairs.py).
 2. Put its CSVs in `data/raw/` (`{PAIR}_{tf}.csv` for 1w/1d/4h/2h/1h/5m).
 3. `docker compose restart worker`.
 
@@ -171,7 +171,7 @@ routes are unchanged and still serve the legacy page at `/`.
   file is what `/api/v1/logs/tail` serves. `docker compose logs` is
   unchanged.
 - **Image.** The Dockerfile's node stage builds `frontend/dist`, so
-  `docker compose build` needs no local npm; `deploy.sh` stamps the commit
+  `docker compose build` needs no local npm; `deploy/deploy.sh` stamps the commit
   and build time into `/api/v1/version`. Rebuild both services after a
   pull: `docker compose build && docker compose up -d`.
 - **Health fields.** `cycle_5m_s` and `rss_mb` come from

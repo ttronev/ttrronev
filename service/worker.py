@@ -10,7 +10,7 @@ One asyncio process, two regen loops per pair plus a live-price poller:
                  the fetch decides whether a weekly bar landed), regen their
                  detectors slowest-first, then run the derived chain ONCE
                  (cleanness → nesting → known_at → L5 → L5.1 — the
-                 load-bearing order from MEMORY_HYGIENE.md), then rebuild
+                 load-bearing order from docs/runbooks/memory_hygiene.md), then rebuild
                  state + alerts. Batching guarantees the chain never runs
                  between two detector regens of the same boundary, and makes
                  "range memory recomputes at most hourly" true by

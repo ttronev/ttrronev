@@ -42,7 +42,7 @@ MOVES: list[tuple[str, str | None]] = [
     ("backtesting/level_features.py", "research/backtesting/level_features.py"),
     ("backtesting/secondary_only_engine.py", "research/backtesting/secondary_only_engine.py"),
     ("paper_trade/__init__.py", "archive/paper_trade/__init__.py"),
-    ("ml_models/README.md", "archive/ml_models/README.md"),
+    ("ml_models/__init__.py", "archive/ml_models/__init__.py"),
     ("openclaw/bridge.py", "archive/openclaw/bridge.py"),
     ("strategies/strategy_log.md", "archive/strategies/strategy_log.md"),
     ("exchange/bybit_client.py", "archive/exchange_stubs/bybit_client.py"),

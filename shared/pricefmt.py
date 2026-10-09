@@ -1,7 +1,7 @@
 """
 shared/pricefmt.py — price rounding and display that work at ANY price scale.
 
-Memory hygiene: see MEMORY_HYGIENE.md (pure functions, no I/O).
+Memory hygiene: see docs/runbooks/memory_hygiene.md (pure functions, no I/O).
 
 Why this exists: the stack was calibrated on SOL (~$100) and rounded every
 published price to 6 decimals and printed 2. That is fine for SOL and BTC and

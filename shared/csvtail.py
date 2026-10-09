@@ -1,7 +1,7 @@
 """
 shared/csvtail.py — read only the END of a candle CSV.
 
-Memory hygiene: see MEMORY_HYGIENE.md, rule 2 ("slice, don't load"). The
+Memory hygiene: see docs/runbooks/memory_hygiene.md, rule 2 ("slice, don't load"). The
 service's 5-minute path used to pd.read_csv() whole files to use their last
 few hundred rows: a 45-day 5m window is ~13k rows, the BTC 5m file is ~950k.
 These helpers seek to the tail and parse only that.
